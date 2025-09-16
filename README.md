@@ -86,6 +86,8 @@ as much on the GPU as we can get away with.
 support common use cases is necessary, but don't expect forms and buttons.
 - **Live Code Change** - Inlyne will monitor your markdown file for any write modifications and automatically refresh
 the document where you left off. It's designed to work seamlessly and allow you to make edits on the fly.
+- **Keybinding Help** - Press `?` to display a popup with all available keyboard shortcuts, making the app more discoverable.
+- **Highly Customizable** - Extensive theming options including header colors, scrollbar appearance, and page margins.
 
 ## What does it support?
 
@@ -148,6 +150,43 @@ Use `inlyne --help` to see all the command line options. Some of which can be se
 - Mac: `/Users/Alice/Library/Application Support/inlyne/inlyne.toml`
 
 Checkout `inlyne.default.toml` for an example configuration.
+
+### Customization Options
+
+Inlyne supports extensive visual customization through the configuration file:
+
+#### Theme Settings
+Both `dark-theme` and `light-theme` sections support:
+- `header-color` - Custom color for all heading levels (H1-H6)
+- `scrollbar-width` - Width in pixels (0 to hide)
+- `scrollbar-color` - Custom scrollbar color
+- `page-margin` - Left and right margins in pixels
+
+Example configuration:
+```toml
+[dark-theme]
+header-color = 0x4182eb      # Blue headers
+scrollbar-width = 8          # 8-pixel wide scrollbar
+scrollbar-color = 0x4d4d4d   # Dark gray scrollbar
+page-margin = 100            # 100-pixel margins
+
+[light-theme]
+header-color = 0x2563eb      # Different blue for light mode
+scrollbar-width = 5          # Narrower scrollbar
+scrollbar-color = 0xcccccc   # Light gray scrollbar
+page-margin = 120            # Wider margins in light mode
+```
+
+### Keyboard Shortcuts
+
+Press `?` while viewing a document to display the help popup with all available keybindings. The help popup can be customized through the keybindings configuration, and the default key to toggle it can be changed:
+
+```toml
+[keybindings]
+extra = [
+    ["Help", { key = "h", mod = ["Ctrl"] }]  # Change help key to Ctrl+H
+]
+```
 
 ## FAQ
 

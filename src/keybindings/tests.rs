@@ -65,6 +65,7 @@ base = [
     ["ToTop", "Home"],
     ["ToBottom", "End"],
     ["Quit", "Escape"],
+    ["Help", { key = "/", mod = ["Shift"] }],
     # Vim-like
     ["Copy", "y"],
     ["ScrollUp", "k"],
