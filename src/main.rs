@@ -373,10 +373,11 @@ impl Inlyne {
                         };
                         self.window.set_cursor_icon(cursor_icon);
 
+                        let scrollbar_width = self.renderer.scrollbar_width();
                         if scrollbar_held.is_some()
                             || (Rect::new(
-                                (screen_size.0 - DEFAULT_MARGIN / 4., 0.),
-                                (DEFAULT_MARGIN / 4., screen_size.1),
+                                (screen_size.0 - scrollbar_width, 0.),
+                                (scrollbar_width, screen_size.1),
                             )
                             .contains(position.into())
                                 && mouse_down)
@@ -385,12 +386,12 @@ impl Inlyne {
                             if scrollbar_held.is_none() {
                                 if Rect::new(
                                     (
-                                        screen_size.0 - DEFAULT_MARGIN / 4.,
+                                        screen_size.0 - scrollbar_width,
                                         ((self.renderer.scroll_y
                                             / self.renderer.positioner.reserved_height)
                                             * screen_size.1),
                                     ),
-                                    (DEFAULT_MARGIN / 4., scrollbar_height),
+                                    (scrollbar_width, scrollbar_height),
                                 )
                                 .contains(position.into())
                                 {
@@ -432,9 +433,10 @@ impl Inlyne {
                             let screen_size = self.renderer.screen_size();
 
                             let y = mouse_position.1 - self.renderer.scroll_y;
+                            let scrollbar_width = self.renderer.scrollbar_width();
                             if Rect::new(
-                                (screen_size.0 - DEFAULT_MARGIN / 4., 0.),
-                                (DEFAULT_MARGIN / 4., screen_size.1),
+                                (screen_size.0 - scrollbar_width, 0.),
+                                (scrollbar_width, screen_size.1),
                             ).contains((mouse_position.0, y)) {
                                 let scrollbar_height = self.renderer.scrollbar_height();
 

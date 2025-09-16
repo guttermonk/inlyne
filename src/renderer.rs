@@ -191,6 +191,12 @@ impl Renderer {
     }
 
     fn draw_scrollbar(&mut self) -> anyhow::Result<()> {
+        let scrollbar_width = self.theme.scrollbar_width as f32;
+        // If scrollbar width is 0, hide the scrollbar
+        if scrollbar_width == 0.0 {
+            return Ok(());
+        }
+        
         let (screen_width, screen_height) = self.screen_size();
         if screen_height > self.positioner.reserved_height {
             return Ok(());
@@ -199,10 +205,10 @@ impl Renderer {
         self.draw_rectangle(
             Rect::new(
                 (
-                    screen_width - DEFAULT_MARGIN / 4.,
+                    screen_width - scrollbar_width,
                     ((self.scroll_y / self.positioner.reserved_height) * screen_height),
                 ),
-                (DEFAULT_MARGIN / 4., height),
+                (scrollbar_width, height),
             ),
             [0.3, 0.3, 0.3, 1.0],
         )?;
@@ -211,6 +217,10 @@ impl Renderer {
 
     pub fn scrollbar_height(&self) -> f32 {
         (self.screen_height() / self.positioner.reserved_height) * self.screen_height()
+    }
+    
+    pub fn scrollbar_width(&self) -> f32 {
+        self.theme.scrollbar_width as f32
     }
 
     fn render_elements(

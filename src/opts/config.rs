@@ -29,6 +29,8 @@ pub struct OptionalTheme {
     pub link_color: Option<u32>,
     pub select_color: Option<u32>,
     pub checkbox_color: Option<u32>,
+    pub header_color: Option<u32>,
+    pub scrollbar_width: Option<u32>,
     pub code_highlighter: Option<color::SyntaxTheme>,
 }
 
@@ -47,6 +49,8 @@ impl OptionalTheme {
             link_color: self.link_color.unwrap_or(other.link_color),
             select_color: self.select_color.unwrap_or(other.select_color),
             checkbox_color: self.checkbox_color.unwrap_or(other.checkbox_color),
+            header_color: self.header_color.unwrap_or(other.header_color),
+            scrollbar_width: self.scrollbar_width.unwrap_or(other.scrollbar_width),
             code_highlighter,
         })
     }

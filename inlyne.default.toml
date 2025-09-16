@@ -41,6 +41,15 @@ link-color = 0x4182eb
 select-color = 0x3675cb
 # Checkbox ticked background color
 checkbox-color = 0x0a5301
+# Header text color for all heading levels (H1-H6)
+# This overrides the default text color for markdown headers
+# Example: header-color = 0x2563eb for a blue color
+header-color = 0x9dacbb
+# Scrollbar width in pixels
+# Set to 0 to completely hide the scrollbar
+# Recommended values: 3-10 for a subtle scrollbar, 10-20 for more prominent
+# Example: scrollbar-width = 8
+scrollbar-width = 5
 # Syntax highlighting theme. All of `syntect`s default themes are supported
 # Possible values: [
 #     "base16-eighties-dark", "base16-mocha-dark", "base16-ocean-dark",
@@ -67,6 +76,10 @@ quote-block-color = 0xeef9fe
 link-color = 0x5466ff
 select-color = 0xcde8f0
 checkbox-color = 0x96ecae
+# Headers appear in default text color (black) in light theme
+header-color = 0x000000
+# Same scrollbar width is used for both themes
+scrollbar-width = 5
 code-highlighter = "github"
 
 # Specify the main and monospace font families

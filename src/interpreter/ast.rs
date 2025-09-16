@@ -33,6 +33,7 @@ struct TextOptions {
     pub block_quote: u8,
     pub align: Option<Align>,
     pub link: Option<Rc<str>>,
+    pub header_color: Option<[f32; 4]>,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -346,6 +347,9 @@ trait Process {
                     text = text.make_underlined(true);
                 }
             }
+            if let Some(header_color) = state.text_options.header_color {
+                text = text.with_color(header_color);
+            }
             if let Some(ref link) = state.text_options.link {
                 text = text.with_link(link.to_string());
                 text = text.with_color(global.opts.native_color(global.opts.theme.link_color));
@@ -481,6 +485,7 @@ impl Process for FlowProcess {
                 element.set_align_or_default(state.text_options.align);
 
                 state.text_options.bold = true;
+                state.text_options.header_color = Some(global.opts.native_color(global.opts.theme.header_color));
                 element.font_size *= header.size_multiplier();
 
                 if header == HeaderType::H1 {

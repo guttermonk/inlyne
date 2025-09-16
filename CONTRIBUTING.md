@@ -22,6 +22,26 @@ cargo insta review
 # ... Review the changes to make sure they look right
 ```
 
+### Nix Development Environment
+
+If you're on NixOS or have Nix installed, you can use the provided flake to get
+a development environment with all dependencies pre-configured:
+
+```sh
+# Enter development shell with all dependencies
+nix develop
+
+# Or use direnv for automatic environment loading
+direnv allow
+
+# Build and test using Nix
+nix build
+nix run . -- README.md
+```
+
+This provides all necessary dependencies including Rust, fontconfig, Wayland/X11
+libraries, and GPU support libraries automatically.
+
 # Release checklist
 
 _If you're wondering 'Is this relevant to me?' Then the answer is probably no

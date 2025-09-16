@@ -1,2 +1,9 @@
 /target
 /flamegraph.svg
+
+# Nix build outputs
+/result
+/result-*
+
+# Direnv cache
+/.direnv/

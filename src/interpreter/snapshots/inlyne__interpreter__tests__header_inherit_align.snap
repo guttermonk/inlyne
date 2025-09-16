@@ -1,5 +1,6 @@
 ---
 source: src/interpreter/tests.rs
+assertion_line: 303
 description: " --- md\n\n\n<div align=\"center\">\n  <h4>\n    <a href=\"#install\">\n      Install\n    </a>\n    <span> | </span>\n    <a href=\"#usage\">\n      Usage\n    </a>\n  </h4>\n</div>\n\n --- html\n\n<div align=\"center\">\n  <h4>\n    <a href=\"#install\">\n      Install\n    </a>\n    <span> | </span>\n    <a href=\"#usage\">\n      Usage\n    </a>\n  </h4>\n</div>\n"
 expression: "interpret_md_with_opts(text, opts)"
 ---
@@ -26,7 +27,7 @@ expression: "interpret_md_with_opts(text, opts)"
                 },
                 Text {
                     text: " | ",
-                    default_color: Color(BLACK),
+                    color: Some(Color(BLACK)),
                     style: BOLD ,
                     ..
                 },

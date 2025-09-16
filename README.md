@@ -34,6 +34,32 @@ Installation should be mostly painless as _most_ things come pre-bundled.
 
 [![Packaging status](https://repology.org/badge/vertical-allrepos/inlyne.svg?exclude_unsupported=1)](https://repology.org/project/inlyne/versions)
 
+### NixOS / Nix with Flakes
+
+This project includes a `flake.nix` for easy installation on NixOS or any system with Nix:
+
+```bash
+# Run directly without installing
+nix run github:Inlyne-Project/inlyne -- README.md
+
+# Install to your profile
+nix profile install github:Inlyne-Project/inlyne
+
+# Build locally from source
+git clone https://github.com/Inlyne-Project/inlyne
+cd inlyne
+nix build
+./result/bin/inlyne README.md
+
+# Enter development shell with all dependencies
+nix develop
+```
+
+For development, you can also use `direnv` to automatically load the environment:
+```bash
+direnv allow
+```
+
 ### Building from Source
 
 There are a small handful of dependencies needed to build `inlyne` from source.
