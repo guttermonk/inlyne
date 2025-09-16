@@ -67,8 +67,7 @@
             lockFile = ./Cargo.lock;
           };
           
-          inherit buildInputs;
-          nativeBuildInputs = nativeBuildInputs ++ [ pkgs.makeWrapper ];
+          inherit buildInputs nativeBuildInputs;
           
           # Set feature flags (both wayland and x11 are default)
           buildFeatures = [ "wayland" "x11" ];
