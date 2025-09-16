@@ -7,7 +7,7 @@ use crate::interpreter::html::style::{FontStyle, FontWeight, Style, TextDecorati
 use crate::interpreter::html::{style, Attr, HeaderType, Picture, TagName};
 use crate::interpreter::{Span, WindowInteractor};
 use crate::opts::ResolvedTheme;
-use crate::positioner::{Positioned, Row, Section, Spacer, DEFAULT_MARGIN};
+use crate::positioner::{Positioned, Row, Section, Spacer};
 use crate::table::Table;
 use crate::text::{Text, TextBox};
 use crate::utils::{Align, ImageCache};
@@ -147,6 +147,7 @@ pub struct AstOpts {
     pub theme: Theme,
     pub hidpi_scale: f32,
     pub surface_format: TextureFormat,
+    pub page_margin: f32,
 
     // needed for images
     pub color_scheme: Option<ResolvedTheme>,
@@ -442,7 +443,7 @@ impl Process for FlowProcess {
             TagName::BlockQuote => {
                 output.push_text_box(global, element, state.borrow());
                 state.text_options.block_quote += 1;
-                state.global_indent += DEFAULT_MARGIN / 2.;
+                state.global_indent += global.opts.page_margin / 2.;
 
                 let indent = state.global_indent;
 
@@ -455,7 +456,7 @@ impl Process for FlowProcess {
                 );
                 output.push_text_box(global, element, state);
 
-                if indent == DEFAULT_MARGIN / 2. {
+                if indent == global.opts.page_margin / 2. {
                     output.push_spacer();
                 }
             }
@@ -702,7 +703,7 @@ impl Process for OrderedListProcess {
             }
         }
         output.push_text_box(global, element, state.borrow());
-        state.global_indent += DEFAULT_MARGIN / 2.;
+        state.global_indent += global.opts.page_margin / 2.;
 
         Self::process_with(
             global,
@@ -722,7 +723,7 @@ impl Process for OrderedListProcess {
             },
             |_| {},
         );
-        if state.global_indent == DEFAULT_MARGIN / 2. {
+        if state.global_indent == global.opts.page_margin / 2. {
             output.push_spacer();
         }
     }
@@ -738,7 +739,7 @@ impl Process for UnorderedListProcess {
         output: &mut impl Push<Element>,
     ) {
         output.push_text_box(global, element, state.borrow());
-        state.global_indent += DEFAULT_MARGIN / 2.;
+        state.global_indent += global.opts.page_margin / 2.;
 
         Self::process_with(
             global,
@@ -751,7 +752,7 @@ impl Process for UnorderedListProcess {
             },
             |_| {},
         );
-        if state.global_indent == DEFAULT_MARGIN / 2. {
+        if state.global_indent == global.opts.page_margin / 2. {
             output.push_spacer();
         }
     }

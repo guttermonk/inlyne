@@ -149,6 +149,7 @@ pub struct Inlyne {
     need_repositioning: bool,
     watcher: Watcher,
     selection: Selection,
+    help_visible: bool,
 }
 
 impl Inlyne {
@@ -229,7 +230,31 @@ impl Inlyne {
             need_repositioning: false,
             watcher,
             selection: Selection::new(),
+            help_visible: false,
         })
+    }
+
+    fn get_formatted_keybindings(&self) -> Vec<(String, String)> {
+        let mut bindings = Vec::new();
+        
+        // Get the keybindings from keycombos
+        // Format: (action_description, key_combination)
+        bindings.push(("Scroll Up".to_string(), "↑ or k".to_string()));
+        bindings.push(("Scroll Down".to_string(), "↓ or j".to_string()));
+        bindings.push(("Page Up".to_string(), "PageUp".to_string()));
+        bindings.push(("Page Down".to_string(), "PageDown".to_string()));
+        bindings.push(("Go to Top".to_string(), "Home or gg".to_string()));
+        bindings.push(("Go to Bottom".to_string(), "End or G".to_string()));
+        bindings.push(("Zoom In".to_string(), "Ctrl+= or Cmd+=".to_string()));
+        bindings.push(("Zoom Out".to_string(), "Ctrl+- or Cmd+-".to_string()));
+        bindings.push(("Reset Zoom".to_string(), "Ctrl+0 or Cmd+0".to_string()));
+        bindings.push(("Copy Selection".to_string(), "Ctrl+C or y".to_string()));
+        bindings.push(("Next File".to_string(), "Alt+→ or bn".to_string()));
+        bindings.push(("Previous File".to_string(), "Alt+← or bp".to_string()));
+        bindings.push(("Toggle Help".to_string(), "?".to_string()));
+        bindings.push(("Quit".to_string(), "Esc or q".to_string()));
+        
+        bindings
     }
 
     pub fn position_queued_elements(
@@ -325,8 +350,13 @@ impl Inlyne {
                         &mut self.elements,
                     );
                     self.renderer.set_scroll_y(self.renderer.scroll_y);
+                    let keybindings = if self.help_visible {
+                        self.get_formatted_keybindings()
+                    } else {
+                        Vec::new()
+                    };
                     self.renderer
-                        .redraw(&mut self.elements, &mut self.selection)
+                        .redraw(&mut self.elements, &mut self.selection, self.help_visible, &keybindings)
                         .context("Renderer failed to redraw the screen")
                         .unwrap();
 
@@ -592,6 +622,10 @@ impl Inlyne {
                                 }
                                 Action::Copy => clipboard
                                     .set_contents(self.selection.text.trim().to_owned()),
+                                Action::Help => {
+                                    self.help_visible = !self.help_visible;
+                                    self.window.request_redraw();
+                                }
                                 Action::Quit => *control_flow = ControlFlow::Exit,
                                 Action::History(hist_dir) => {
                                     let changed_path = match hist_dir {

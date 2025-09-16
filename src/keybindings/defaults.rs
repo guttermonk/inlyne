@@ -84,6 +84,14 @@ pub fn defaults() -> Vec<(Action, KeyCombo)> {
         ),
         // Quit: Esc
         (Action::Quit, KeyCombo::from(VirtKey::Escape)),
+        // Help: ? (Shift+/)
+        (
+            Action::Help,
+            KeyCombo(vec![ModifiedKey(
+                Key::from(VirtKey::Slash),
+                ModifiersState::SHIFT,
+            )]),
+        ),
         // vim-like bindings
         // Copy: y
         (Action::Copy, KeyCombo::from(VirtKey::Y)),

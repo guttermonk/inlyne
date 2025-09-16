@@ -7,7 +7,7 @@ use crate::fonts::get_fonts;
 use crate::image::ImageRenderer;
 use crate::metrics::{histogram, HistTag};
 use crate::opts::FontOptions;
-use crate::positioner::{Positioned, Positioner, DEFAULT_MARGIN};
+use crate::positioner::{Positioned, Positioner};
 use crate::selection::Selection;
 use crate::table::TABLE_ROW_GAP;
 use crate::text::{CachedTextArea, TextCache, TextSystem};
@@ -170,7 +170,7 @@ impl Renderer {
 
         let lyon_buffer: VertexBuffers<Vertex, u16> = VertexBuffers::new();
 
-        let positioner = Positioner::new(window.inner_size().into(), hidpi_scale, page_width);
+        let positioner = Positioner::new(window.inner_size().into(), hidpi_scale, page_width, theme.page_margin as f32);
         Ok(Self {
             config,
             surface,
@@ -210,7 +210,7 @@ impl Renderer {
                 ),
                 (scrollbar_width, height),
             ),
-            [0.3, 0.3, 0.3, 1.0],
+            native_color(self.theme.scrollbar_color, &self.surface_format),
         )?;
         Ok(())
     }
@@ -221,6 +221,50 @@ impl Renderer {
     
     pub fn scrollbar_width(&self) -> f32 {
         self.theme.scrollbar_width as f32
+    }
+
+    fn draw_help_popup(&mut self, _keybindings: &[(String, String)]) -> anyhow::Result<()> {
+        let (screen_width, screen_height) = self.screen_size();
+        
+        // Draw semi-transparent overlay
+        self.draw_rectangle(
+            Rect::new((0.0, 0.0), (screen_width, screen_height)),
+            [0.0, 0.0, 0.0, 0.7],
+        )?;
+        
+        // Calculate popup dimensions
+        let popup_width = (screen_width * 0.8).min(800.0);
+        let popup_height = (screen_height * 0.8).min(600.0);
+        let popup_x = (screen_width - popup_width) / 2.0;
+        let popup_y = (screen_height - popup_height) / 2.0;
+        
+        // Draw popup background
+        let bg_color = native_color(self.theme.background_color, &self.surface_format);
+        self.draw_rectangle(
+            Rect::new((popup_x, popup_y), (popup_width, popup_height)),
+            bg_color,
+        )?;
+        
+        // Draw border
+        let border_color = native_color(self.theme.text_color, &self.surface_format);
+        self.stroke_rectangle(
+            Rect::new((popup_x, popup_y), (popup_width, popup_height)),
+            border_color,
+            2.0 * self.hidpi_scale,
+        )?;
+        
+        // Draw title
+        let title_y = popup_y + 30.0 * self.hidpi_scale;
+        self.draw_rectangle(
+            Rect::new((popup_x, title_y), (popup_width, 2.0 * self.hidpi_scale)),
+            border_color,
+        )?;
+        
+        // Note: Text rendering would require more complex setup with the text system
+        // For now, we just draw the popup box as a placeholder
+        // In a full implementation, we would use the text system to render the keybindings
+        
+        Ok(())
     }
 
     fn render_elements(
@@ -253,7 +297,7 @@ impl Renderer {
                     }
 
                     let bounds = (
-                        (screen_size.0 - pos.0 - DEFAULT_MARGIN - centering).max(0.),
+                        (screen_size.0 - pos.0 - self.positioner.page_margin - centering).max(0.),
                         f32::INFINITY,
                     );
 
@@ -285,26 +329,26 @@ impl Renderer {
                             min.1 + size.1 + 12. * self.hidpi_scale * self.zoom,
                         );
                         if let Some(nest) = text_box.is_quote_block {
-                            min.0 -= (nest - 1) as f32 * DEFAULT_MARGIN / 2.;
+                            min.0 -= (nest - 1) as f32 * self.positioner.page_margin / 2.;
                         }
-                        if min.0 < screen_size.0 - DEFAULT_MARGIN - centering {
+                        if min.0 < screen_size.0 - self.positioner.page_margin - centering {
                             self.draw_rectangle(Rect::from_min_max(min, max), color)?;
                         }
                     }
                     if let Some(nest) = text_box.is_quote_block {
                         for n in 0..nest {
-                            let nest_indent = n as f32 * DEFAULT_MARGIN / 2.;
+                            let nest_indent = n as f32 * self.positioner.page_margin / 2.;
                             let min = (
                                 (scrolled_pos.0
                                     - 10.
                                     - 5. * self.hidpi_scale * self.zoom
                                     - nest_indent)
-                                    .min(screen_size.0 - DEFAULT_MARGIN - centering),
+                                    .min(screen_size.0 - self.positioner.page_margin - centering),
                                 scrolled_pos.1,
                             );
                             let max = (
                                 (scrolled_pos.0 - 10. - nest_indent)
-                                    .min(screen_size.0 - DEFAULT_MARGIN - centering),
+                                    .min(screen_size.0 - self.positioner.page_margin - centering),
                                 min.1 + size.1 + 5. * self.hidpi_scale * self.zoom,
                             );
                             self.draw_rectangle(
@@ -323,7 +367,7 @@ impl Renderer {
                             scrolled_pos.0 + box_size - box_size * 1.5,
                             scrolled_pos.1 + line_height / 2. + box_size / 2.,
                         );
-                        if max.0 < screen_size.0 - DEFAULT_MARGIN - centering {
+                        if max.0 < screen_size.0 - self.positioner.page_margin - centering {
                             if is_checked {
                                 self.draw_rectangle(
                                     Rect::from_min_max(min, max),
@@ -374,7 +418,7 @@ impl Renderer {
                 }
                 Element::Table(table) => {
                     let bounds = (
-                        (screen_size.0 - pos.0 - DEFAULT_MARGIN - centering).max(0.),
+                        (screen_size.0 - pos.0 - self.positioner.page_margin - centering).max(0.),
                         f32::INFINITY,
                     );
                     let layout = table.layout(
@@ -431,7 +475,7 @@ impl Renderer {
                             .unwrap_or(0.);
                         {
                             let min = (
-                                scrolled_pos.0.max(DEFAULT_MARGIN + centering),
+                                scrolled_pos.0.max(self.positioner.page_margin + centering),
                                 scrolled_pos.1 + y,
                             );
                             let max = (
@@ -451,12 +495,12 @@ impl Renderer {
                         self.draw_rectangle(
                             Rect::new(
                                 (
-                                    DEFAULT_MARGIN + centering,
+                                    self.positioner.page_margin + centering,
                                     scrolled_pos.1 + size.1 / 2.
                                         - 2. * self.hidpi_scale * self.zoom,
                                 ),
                                 (
-                                    screen_size.0 - 2. * (DEFAULT_MARGIN + centering),
+                                    screen_size.0 - 2. * (self.positioner.page_margin + centering),
                                     2. * self.hidpi_scale * self.zoom,
                                 ),
                             ),
@@ -691,6 +735,8 @@ impl Renderer {
         &mut self,
         elements: &mut [Positioned<Element>],
         selection: &mut Selection,
+        help_visible: bool,
+        keybindings: &[(String, String)],
     ) -> anyhow::Result<()> {
         selection.text.clear();
         let frame = self
@@ -790,6 +836,50 @@ impl Renderer {
                 .text_renderer
                 .render(&self.text_system.text_atlas, &mut rpass)
                 .unwrap();
+        }
+
+        // Draw help popup if visible
+        if help_visible {
+            // Prepare lyon buffer for help popup
+            self.lyon_buffer.indices.clear();
+            self.lyon_buffer.vertices.clear();
+            
+            self.draw_help_popup(keybindings)?;
+            
+            // Create buffers for help popup
+            let help_vertex_buf = self
+                .device
+                .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                    label: Some("Help Vertex Buffer"),
+                    contents: bytemuck::cast_slice(&self.lyon_buffer.vertices),
+                    usage: wgpu::BufferUsages::VERTEX,
+                });
+            let help_index_buffer = self
+                .device
+                .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                    label: Some("Help Index Buffer"),
+                    contents: bytemuck::cast_slice(&self.lyon_buffer.indices),
+                    usage: wgpu::BufferUsages::INDEX,
+                });
+            
+            // Draw help popup overlay in a separate render pass
+            let mut help_rpass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("Help Render Pass"),
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view: &view,
+                    resolve_target: None,
+                    ops: wgpu::Operations {
+                        load: wgpu::LoadOp::Load,
+                        store: true,
+                    },
+                })],
+                depth_stencil_attachment: None,
+            });
+            
+            help_rpass.set_pipeline(&self.render_pipeline);
+            help_rpass.set_vertex_buffer(0, help_vertex_buf.slice(..));
+            help_rpass.set_index_buffer(help_index_buffer.slice(..), wgpu::IndexFormat::Uint16);
+            help_rpass.draw_indexed(0..self.lyon_buffer.indices.len() as u32, 0, 0..1);
         }
 
         self.queue.submit(Some(encoder.finish()));

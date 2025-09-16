@@ -137,6 +137,7 @@ impl HtmlInterpreter {
                 theme: theme.clone(),
                 surface_format,
                 hidpi_scale,
+                page_margin: theme.page_margin as f32,
                 image_cache,
                 window: Arc::clone(&window),
                 color_scheme,

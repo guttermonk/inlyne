@@ -44,18 +44,20 @@ pub struct Positioner {
     pub reserved_height: f32,
     pub hidpi_scale: f32,
     pub page_width: f32,
+    pub page_margin: f32,
     pub anchors: HashMap<String, f32>,
     pub taffy: Taffy,
 }
 
 impl Positioner {
-    pub fn new(screen_size: Size, hidpi_scale: f32, page_width: f32) -> Self {
+    pub fn new(screen_size: Size, hidpi_scale: f32, page_width: f32, page_margin: f32) -> Self {
         let mut taffy = Taffy::new();
         taffy.disable_rounding();
         Self {
             reserved_height: DEFAULT_PADDING * hidpi_scale,
             hidpi_scale,
             page_width,
+            page_margin,
             screen_size,
             anchors: HashMap::new(),
             taffy,
@@ -74,12 +76,12 @@ impl Positioner {
         let bounds = match &mut element.inner {
             Element::TextBox(text_box) => {
                 let indent = text_box.indent;
-                let pos = (DEFAULT_MARGIN + indent + centering, self.reserved_height);
+                let pos = (self.page_margin + indent + centering, self.reserved_height);
 
                 let size = text_box.size(
                     text_system,
                     (
-                        (self.screen_size.0 - pos.0 - DEFAULT_MARGIN - centering).max(0.),
+                        (self.screen_size.0 - pos.0 - self.page_margin - centering).max(0.),
                         f32::INFINITY,
                     ),
                     zoom,
@@ -107,27 +109,27 @@ impl Positioner {
                         (self.screen_size.0 / 2. - size.0 / 2., self.reserved_height),
                         size,
                     ),
-                    _ => Rect::new((DEFAULT_MARGIN + centering, self.reserved_height), size),
+                    _ => Rect::new((self.page_margin + centering, self.reserved_height), size),
                 }
             }
             Element::Table(table) => {
-                let pos = (DEFAULT_MARGIN + centering, self.reserved_height);
+                let pos = (self.page_margin + centering, self.reserved_height);
                 let layout = table.layout(
                     text_system,
                     &mut self.taffy,
                     (
-                        self.screen_size.0 - pos.0 - DEFAULT_MARGIN - centering,
+                        self.screen_size.0 - pos.0 - self.page_margin - centering,
                         f32::INFINITY,
                     ),
                     zoom,
                 )?;
                 Rect::new(
-                    (DEFAULT_MARGIN + centering, self.reserved_height),
+                    (self.page_margin + centering, self.reserved_height),
                     layout.size,
                 )
             }
             Element::Row(row) => {
-                let mut reserved_width = DEFAULT_MARGIN + centering;
+                let mut reserved_width = self.page_margin + centering;
                 let mut inner_reserved_height: f32 = 0.;
                 let mut max_height: f32 = 0.;
                 let mut max_width: f32 = 0.;
@@ -142,16 +144,16 @@ impl Positioner {
                         + DEFAULT_PADDING * self.hidpi_scale * zoom
                         + element_bounds.size.0;
                     // Row would be too long with this element so add another line
-                    if target_width > self.screen_size.0 - DEFAULT_MARGIN - centering {
+                    if target_width > self.screen_size.0 - self.page_margin - centering {
                         max_width = max_width.max(reserved_width);
-                        reserved_width = DEFAULT_MARGIN
+                        reserved_width = self.page_margin
                             + centering
                             + DEFAULT_PADDING * self.hidpi_scale * zoom
                             + element_bounds.size.0;
                         inner_reserved_height +=
                             max_height + DEFAULT_PADDING * self.hidpi_scale * zoom;
                         max_height = element_bounds.size.1;
-                        element_bounds.pos.0 = DEFAULT_MARGIN + centering;
+                        element_bounds.pos.0 = self.page_margin + centering;
                     } else {
                         max_height = max_height.max(element_bounds.size.1);
                         element_bounds.pos.0 = reserved_width;
@@ -162,16 +164,16 @@ impl Positioner {
                 max_width = max_width.max(reserved_width);
                 inner_reserved_height += max_height + DEFAULT_PADDING * self.hidpi_scale * zoom;
                 Rect::new(
-                    (DEFAULT_MARGIN + centering, self.reserved_height),
+                    (self.page_margin + centering, self.reserved_height),
                     (
-                        max_width - DEFAULT_MARGIN - centering,
+                        max_width - self.page_margin - centering,
                         inner_reserved_height,
                     ),
                 )
             }
             Element::Section(section) => {
                 let mut section_bounds =
-                    Rect::new((DEFAULT_MARGIN + centering, self.reserved_height), (0., 0.));
+                    Rect::new((self.page_margin + centering, self.reserved_height), (0., 0.));
                 if let Some(ref mut summary) = *section.summary {
                     self.position(text_system, summary, zoom)?;
                     let element_size = summary

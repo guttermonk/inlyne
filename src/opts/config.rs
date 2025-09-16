@@ -31,6 +31,8 @@ pub struct OptionalTheme {
     pub checkbox_color: Option<u32>,
     pub header_color: Option<u32>,
     pub scrollbar_width: Option<u32>,
+    pub scrollbar_color: Option<u32>,
+    pub page_margin: Option<u32>,
     pub code_highlighter: Option<color::SyntaxTheme>,
 }
 
@@ -51,6 +53,8 @@ impl OptionalTheme {
             checkbox_color: self.checkbox_color.unwrap_or(other.checkbox_color),
             header_color: self.header_color.unwrap_or(other.header_color),
             scrollbar_width: self.scrollbar_width.unwrap_or(other.scrollbar_width),
+            scrollbar_color: self.scrollbar_color.unwrap_or(other.scrollbar_color),
+            page_margin: self.page_margin.unwrap_or(other.page_margin),
             code_highlighter,
         })
     }

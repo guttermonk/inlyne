@@ -50,6 +50,13 @@ header-color = 0x9dacbb
 # Recommended values: 3-10 for a subtle scrollbar, 10-20 for more prominent
 # Example: scrollbar-width = 8
 scrollbar-width = 5
+# Scrollbar color
+# Example: scrollbar-color = 0x808080 for gray
+scrollbar-color = 0x4d4d4d
+# Page margin in pixels (applied to both left and right sides)
+# Controls how much space to leave on the sides of the content
+# Example: page-margin = 50 for narrow margins, 150 for wide margins
+page-margin = 100
 # Syntax highlighting theme. All of `syntect`s default themes are supported
 # Possible values: [
 #     "base16-eighties-dark", "base16-mocha-dark", "base16-ocean-dark",
@@ -80,6 +87,10 @@ checkbox-color = 0x96ecae
 header-color = 0x000000
 # Same scrollbar width is used for both themes
 scrollbar-width = 5
+# Lighter scrollbar color for light theme
+scrollbar-color = 0xcccccc
+# Same page margins for both themes
+page-margin = 100
 code-highlighter = "github"
 
 # Specify the main and monospace font families
@@ -114,6 +125,7 @@ code-highlighter = "github"
 #     "PageUp", "PageDown",
 #     "ZoomIn", "ZoomOut", "ZoomReset",
 #     "Copy",
+#     "Help",
 #     "Quit",
 # ]
 # Possible Keys: [
@@ -129,6 +141,7 @@ code-highlighter = "github"
 # ]
 [keybindings]
 # The default keybindings include both normal and vim-like bindings
+# Press ? to show help with all current keybindings
 
 # Base will override the defaults keybindings if set. Useful for when you want
 # to fully specify all of the keybindings

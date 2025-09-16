@@ -6,6 +6,7 @@ pub enum Action {
     Page(VertDirection),
     Zoom(Zoom),
     Copy,
+    Help,
     Quit,
 }
 

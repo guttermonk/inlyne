@@ -44,6 +44,8 @@ pub struct Theme {
     pub checkbox_color: u32,
     pub header_color: u32,
     pub scrollbar_width: u32,
+    pub scrollbar_color: u32,
+    pub page_margin: u32,
     pub code_highlighter: SyntectTheme,
 }
 
@@ -64,6 +66,8 @@ impl Theme {
             checkbox_color: 0x0A5301,
             header_color: 0x9DACBB,
             scrollbar_width: 5,
+            scrollbar_color: 0x4D4D4D,
+            page_margin: 100,
             code_highlighter,
         }
     }
@@ -84,6 +88,8 @@ impl Theme {
             checkbox_color: 0x96ECAE,
             header_color: 0x000000,
             scrollbar_width: 5,
+            scrollbar_color: 0xCCCCCC,
+            page_margin: 100,
             code_highlighter,
         }
     }
