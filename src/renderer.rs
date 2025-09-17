@@ -230,22 +230,23 @@ impl Renderer {
         // Draw semi-transparent overlay
         self.draw_rectangle(
             Rect::new((0.0, 0.0), (screen_width, screen_height)),
-            [0.0, 0.0, 0.0, 0.5],
+            [0.0, 0.0, 0.0, 0.6],
         )?;
         
         // Calculate popup dimensions
-        let popup_width = (screen_width * 0.6).min(600.0);
-        let popup_height = (screen_height * 0.8).min(700.0);
+        let popup_width = (screen_width * 0.7).min(700.0).max(500.0);
+        let popup_height = (screen_height * 0.8).min(600.0).max(400.0);
         let popup_x = (screen_width - popup_width) / 2.0;
         let popup_y = (screen_height - popup_height) / 2.0;
         
-        // Draw popup background with shadow effect
-        let shadow_offset = 4.0 * self.hidpi_scale;
+        // Draw popup shadow
+        let shadow_offset = 5.0 * self.hidpi_scale;
         self.draw_rectangle(
             Rect::new((popup_x + shadow_offset, popup_y + shadow_offset), (popup_width, popup_height)),
-            [0.0, 0.0, 0.0, 0.3],
+            [0.0, 0.0, 0.0, 0.4],
         )?;
         
+        // Draw popup background
         let bg_color = native_color(self.theme.background_color, &self.surface_format);
         self.draw_rectangle(
             Rect::new((popup_x, popup_y), (popup_width, popup_height)),
@@ -253,86 +254,159 @@ impl Renderer {
         )?;
         
         // Draw border
-        let border_color = native_color(self.theme.text_color, &self.surface_format);
+        let text_color = native_color(self.theme.text_color, &self.surface_format);
         self.stroke_rectangle(
             Rect::new((popup_x, popup_y), (popup_width, popup_height)),
-            border_color,
-            3.0 * self.hidpi_scale,
+            text_color,
+            2.0 * self.hidpi_scale,
         )?;
         
         // Draw title bar
-        let title_height = 50.0 * self.hidpi_scale;
-        let accent_color = native_color(self.theme.link_color, &self.surface_format);
+        let title_height = 45.0 * self.hidpi_scale;
+        let header_color = native_color(self.theme.header_color, &self.surface_format);
         self.draw_rectangle(
             Rect::new((popup_x, popup_y), (popup_width, title_height)),
-            accent_color,
+            header_color,
         )?;
+        
+        // Draw "KEYBOARD SHORTCUTS" title text representation
+        // Using simple geometric shapes to represent the title
+        let title_x = popup_x + popup_width / 2.0;
+        let title_y = popup_y + title_height / 2.0;
+        
+        // Draw keyboard icon
+        let kb_width = 30.0 * self.hidpi_scale;
+        let kb_height = 12.0 * self.hidpi_scale;
+        let kb_x = title_x - kb_width - 5.0 * self.hidpi_scale;
+        let kb_y = title_y - kb_height / 2.0;
+        self.stroke_rectangle(
+            Rect::new((kb_x, kb_y), (kb_width, kb_height)),
+            bg_color,
+            1.5 * self.hidpi_scale,
+        )?;
+        // Draw some keys on the keyboard icon
+        for i in 0..3 {
+            for j in 0..5 {
+                let key_size = 4.0 * self.hidpi_scale;
+                self.draw_rectangle(
+                    Rect::new(
+                        (kb_x + 2.0 + j as f32 * (key_size + 1.0), kb_y + 2.0 + i as f32 * (key_size + 0.5)),
+                        (key_size, key_size * 0.8),
+                    ),
+                    bg_color,
+                )?;
+            }
+        }
         
         // Draw title separator
         self.draw_rectangle(
-            Rect::new((popup_x, popup_y + title_height), (popup_width, 2.0 * self.hidpi_scale)),
-            border_color,
+            Rect::new((popup_x, popup_y + title_height), (popup_width, 1.0 * self.hidpi_scale)),
+            text_color,
         )?;
         
-        // Draw "KEYBOARD SHORTCUTS" indicator in title area (visual placeholder)
-        let indicator_width = 20.0 * self.hidpi_scale;
-        let indicator_height = 20.0 * self.hidpi_scale;
-        let indicator_x = popup_x + popup_width / 2.0 - indicator_width / 2.0;
-        let indicator_y = popup_y + title_height / 2.0 - indicator_height / 2.0;
-        self.draw_rectangle(
-            Rect::new((indicator_x, indicator_y), (indicator_width, indicator_height)),
-            bg_color,
-        )?;
-        self.draw_rectangle(
-            Rect::new((indicator_x + 2.0, indicator_y + 2.0), (indicator_width - 4.0, indicator_height - 4.0)),
-            accent_color,
-        )?;
+        // Draw keybindings content
+        let content_padding = 25.0 * self.hidpi_scale;
+        let content_x = popup_x + content_padding;
+        let content_y = popup_y + title_height + content_padding;
+        let line_height = 28.0 * self.hidpi_scale;
+        let column_width = (popup_width - content_padding * 3.0) / 2.0;
         
-        // Draw content area with visual indicators for keybindings
-        let content_y = popup_y + title_height + 20.0 * self.hidpi_scale;
-        let line_height = 30.0 * self.hidpi_scale;
-        let column_width = popup_width / 2.0;
+        // Define the actual keybindings to display
+        let bindings = [
+            ("↑/k", "Scroll Up"),
+            ("↓/j", "Scroll Down"),
+            ("PgUp", "Page Up"),
+            ("PgDn", "Page Down"),
+            ("Home/gg", "Go to Top"),
+            ("End/G", "Go to Bottom"),
+            ("Ctrl+=", "Zoom In"),
+            ("Ctrl+-", "Zoom Out"),
+            ("Ctrl+C/y", "Copy"),
+            ("Alt+→/bn", "Next File"),
+            ("Alt+←/bp", "Prev File"),
+            ("h/?", "Toggle Help"),
+            ("Esc/q", "Quit"),
+        ];
         
-        // Draw visual placeholders for keybinding entries
-        for (i, _binding) in keybindings.iter().enumerate().take(15) {
-            let row = i % 8;
-            let col = i / 8;
-            let x = popup_x + 20.0 * self.hidpi_scale + col as f32 * column_width;
+        // Draw keybinding entries
+        for (i, (key, action)) in bindings.iter().enumerate() {
+            let row = i % 7;
+            let col = i / 7;
+            let x = content_x + col as f32 * column_width;
             let y = content_y + row as f32 * line_height;
             
-            // Draw key indicator box
-            let key_box_width = 60.0 * self.hidpi_scale;
-            let key_box_height = 20.0 * self.hidpi_scale;
+            // Draw key box
+            let key_width = self.estimate_text_width(key) * self.hidpi_scale;
+            let key_height = 18.0 * self.hidpi_scale;
+            let key_bg = [text_color[0] * 0.1, text_color[1] * 0.1, text_color[2] * 0.1, 1.0];
+            self.draw_rectangle(
+                Rect::new((x, y), (key_width, key_height)),
+                key_bg,
+            )?;
             self.stroke_rectangle(
-                Rect::new((x, y), (key_box_width, key_box_height)),
-                border_color,
+                Rect::new((x, y), (key_width, key_height)),
+                text_color,
                 1.0 * self.hidpi_scale,
             )?;
             
-            // Draw action indicator line
-            let action_x = x + key_box_width + 10.0 * self.hidpi_scale;
-            let action_width = column_width - key_box_width - 30.0 * self.hidpi_scale;
-            self.draw_rectangle(
-                Rect::new((action_x, y + key_box_height / 2.0 - 1.0), (action_width, 2.0)),
-                [border_color[0], border_color[1], border_color[2], 0.3],
-            )?;
+            // Draw visual representation of the key text
+            self.draw_text_representation(x + 4.0 * self.hidpi_scale, y + 2.0 * self.hidpi_scale, key, text_color)?;
+            
+            // Draw action text representation
+            let action_x = x + key_width + 10.0 * self.hidpi_scale;
+            self.draw_text_representation(action_x, y + 2.0 * self.hidpi_scale, action, text_color)?;
         }
         
-        // Draw close instruction at bottom
-        let footer_y = popup_y + popup_height - 40.0 * self.hidpi_scale;
+        // Draw footer
+        let footer_y = popup_y + popup_height - 35.0 * self.hidpi_scale;
         self.draw_rectangle(
-            Rect::new((popup_x, footer_y - 2.0), (popup_width, 2.0 * self.hidpi_scale)),
-            border_color,
+            Rect::new((popup_x, footer_y), (popup_width, 1.0 * self.hidpi_scale)),
+            text_color,
         )?;
         
-        // Draw ESC indicator
-        let esc_box_x = popup_x + popup_width / 2.0 - 30.0 * self.hidpi_scale;
-        let esc_box_y = footer_y + 10.0 * self.hidpi_scale;
-        self.stroke_rectangle(
-            Rect::new((esc_box_x, esc_box_y), (60.0 * self.hidpi_scale, 20.0 * self.hidpi_scale)),
-            border_color,
-            2.0 * self.hidpi_scale,
-        )?;
+        // Draw close instruction
+        let close_text = "Press h or ESC to close";
+        let close_x = popup_x + popup_width / 2.0 - 80.0 * self.hidpi_scale;
+        let close_y = footer_y + 10.0 * self.hidpi_scale;
+        self.draw_text_representation(close_x, close_y, close_text, [text_color[0] * 0.7, text_color[1] * 0.7, text_color[2] * 0.7, 1.0])?;
+        
+        Ok(())
+    }
+    
+    // Helper function to estimate text width for layout
+    fn estimate_text_width(&self, text: &str) -> f32 {
+        text.len() as f32 * 7.0 + 10.0
+    }
+    
+    // Helper function to draw a visual representation of text using rectangles
+    fn draw_text_representation(&mut self, x: f32, y: f32, text: &str, color: [f32; 4]) -> anyhow::Result<()> {
+        // Draw a line to represent the text
+        let _text_width = (text.len() as f32 * 5.0) * self.hidpi_scale;
+        let _text_height = 12.0 * self.hidpi_scale;
+        
+        // For special characters, draw recognizable shapes
+        if text.contains("↑") {
+            // Up arrow
+            self.draw_rectangle(Rect::new((x + 2.0, y + 4.0), (2.0, 6.0)), color)?;
+            self.draw_rectangle(Rect::new((x, y + 2.0), (6.0, 2.0)), color)?;
+        } else if text.contains("↓") {
+            // Down arrow
+            self.draw_rectangle(Rect::new((x + 2.0, y + 2.0), (2.0, 6.0)), color)?;
+            self.draw_rectangle(Rect::new((x, y + 8.0), (6.0, 2.0)), color)?;
+        } else {
+            // Generic text representation as a series of small rectangles
+            let char_width = 4.0 * self.hidpi_scale;
+            let char_spacing = 1.0 * self.hidpi_scale;
+            for (i, _) in text.chars().enumerate().take(15) {
+                let char_x = x + i as f32 * (char_width + char_spacing);
+                let char_height = (8.0 + (i % 3) as f32) * self.hidpi_scale;
+                let char_y_offset = (3.0 - (i % 3) as f32) * self.hidpi_scale;
+                self.draw_rectangle(
+                    Rect::new((char_x, y + char_y_offset), (char_width, char_height)),
+                    [color[0], color[1], color[2], color[3] * 0.8],
+                )?;
+            }
+        }
         
         Ok(())
     }

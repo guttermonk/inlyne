@@ -555,6 +555,14 @@ impl Inlyne {
                         }
                     },
                     WindowEvent::ModifiersChanged(new_state) => modifiers = new_state,
+                    WindowEvent::ReceivedCharacter(c) => {
+                        // Handle '?' character directly for better keyboard layout compatibility
+                        if c == '?' && !self.help_visible {
+                            self.help_visible = true;
+                            tracing::debug!("Help popup shown via '?' character");
+                            self.window.request_redraw();
+                        }
+                    }
                     WindowEvent::KeyboardInput {
                         input:
                             KeyboardInput {

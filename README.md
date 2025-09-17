@@ -86,7 +86,7 @@ as much on the GPU as we can get away with.
 support common use cases is necessary, but don't expect forms and buttons.
 - **Live Code Change** - Inlyne will monitor your markdown file for any write modifications and automatically refresh
 the document where you left off. It's designed to work seamlessly and allow you to make edits on the fly.
-- **Keybinding Help** - Press `?` to display a popup with all available keyboard shortcuts, making the app more discoverable.
+- **Keybinding Help** - Press `h` or `?` to display a popup with all available keyboard shortcuts, making the app more discoverable.
 - **Highly Customizable** - Extensive theming options including header colors, scrollbar appearance, and page margins.
 
 ## What does it support?
@@ -179,12 +179,19 @@ page-margin = 120            # Wider margins in light mode
 
 ### Keyboard Shortcuts
 
-Press `?` while viewing a document to display the help popup with all available keybindings. The help popup can be customized through the keybindings configuration, and the default key to toggle it can be changed:
+Press `h` or `?` while viewing a document to display the help popup with all available keybindings. The help popup shows:
+- Navigation shortcuts (scroll, page up/down, jump to top/bottom)
+- Zoom controls
+- File navigation (next/previous file in history)
+- Copy selection
+- Quit commands
+
+The help popup can be closed with `h`, `?`, or `ESC`. The help keybinding can be customized:
 
 ```toml
 [keybindings]
 extra = [
-    ["Help", { key = "h", mod = ["Ctrl"] }]  # Change help key to Ctrl+H
+    ["Help", { key = "F1" }]  # Add F1 as an additional help key
 ]
 ```
 
