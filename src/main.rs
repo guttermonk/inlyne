@@ -238,43 +238,205 @@ impl Inlyne {
         })
     }
 
-    fn get_help_markdown(&self) -> String {
-        let markdown = r#"# Keyboard Shortcuts
-
-## Navigation
-| Action | Keys |
-|--------|------|
-| **Scroll Up** | `↑` or `k` |
-| **Scroll Down** | `↓` or `j` |
-| **Page Up** | `PageUp` |
-| **Page Down** | `PageDown` |
-| **Go to Top** | `Home` or `gg` |
-| **Go to Bottom** | `End` or `G` |
-
-## Zoom
-| Action | Keys |
-|--------|------|
-| **Zoom In** | `Ctrl+=` or `Cmd+=` |
-| **Zoom Out** | `Ctrl+-` or `Cmd+-` |
-| **Reset Zoom** | `Ctrl+0` or `Cmd+0` |
-
-## File Operations
-| Action | Keys |
-|--------|------|
-| **Next File** | `Alt+→` or `bn` |
-| **Previous File** | `Alt+←` or `bp` |
-| **Copy Selection** | `Ctrl+C` or `y` |
-
-## Application
-| Action | Keys |
-|--------|------|
-| **Toggle Help** | `h` or `?` |
-| **Quit** | `Esc` or `q` |
-
----
-*Press `h`, `?`, or `Esc` to close this help*"#;
+    fn get_help_html(&self) -> String {
+        use keybindings::action::{Action, HistDirection, VertDirection, Zoom};
         
-        markdown.to_string()
+        // Convert keybindings to HTML
+        let keybindings: keybindings::Keybindings = self.opts.keybindings.clone().into();
+        
+        // Group keybindings by action
+        let mut action_map: HashMap<String, Vec<String>> = HashMap::new();
+        
+        for (action, combo) in keybindings.iter() {
+            let action_name = match action {
+                Action::Scroll(VertDirection::Up) => "Scroll Up",
+                Action::Scroll(VertDirection::Down) => "Scroll Down",
+                Action::Page(VertDirection::Up) => "Page Up",
+                Action::Page(VertDirection::Down) => "Page Down",
+                Action::ToEdge(VertDirection::Up) => "Go to Top",
+                Action::ToEdge(VertDirection::Down) => "Go to Bottom",
+                Action::Zoom(Zoom::In) => "Zoom In",
+                Action::Zoom(Zoom::Out) => "Zoom Out",
+                Action::Zoom(Zoom::Reset) => "Reset Zoom",
+                Action::History(HistDirection::Next) => "Next File",
+                Action::History(HistDirection::Prev) => "Previous File",
+                Action::Copy => "Copy Selection",
+                Action::Help => "Toggle Help",
+                Action::Quit => "Quit",
+            };
+            
+            let combo_str = format!("{}", combo);
+            action_map.entry(action_name.to_string())
+                .or_insert_with(Vec::new)
+                .push(combo_str);
+        }
+        
+        // Build HTML with better styling
+        let mut html = String::from(r#"<!DOCTYPE html>
+<html>
+<head>
+<style>
+body {
+    font-family: system-ui, -apple-system, sans-serif;
+    max-width: 800px;
+    margin: 0 auto;
+    padding: 20px;
+}
+h1 {
+    text-align: center;
+    color: #2563eb;
+    border-bottom: 3px solid #2563eb;
+    padding-bottom: 10px;
+}
+.section {
+    margin: 20px 0;
+}
+h2 {
+    color: #1e40af;
+    border-bottom: 1px solid #e5e7eb;
+    padding-bottom: 5px;
+}
+table {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 10px 0;
+}
+th {
+    text-align: left;
+    background-color: #f3f4f6;
+    padding: 12px;
+    font-weight: 600;
+}
+td {
+    padding: 10px 12px;
+    border-bottom: 1px solid #e5e7eb;
+}
+.key {
+    background-color: #f3f4f6;
+    padding: 3px 8px;
+    border-radius: 4px;
+    font-family: monospace;
+    font-size: 0.9em;
+    margin: 0 2px;
+    display: inline-block;
+}
+.footer {
+    text-align: center;
+    margin-top: 30px;
+    padding-top: 20px;
+    border-top: 1px solid #e5e7eb;
+    color: #6b7280;
+    font-style: italic;
+}
+</style>
+</head>
+<body>
+<h1>⌨️ Keyboard Shortcuts</h1>
+"#);
+        
+        // Navigation section
+        html.push_str(r#"<div class="section">
+<h2>Navigation</h2>
+<table>
+<tr><th style="width: 40%">Action</th><th>Keys</th></tr>"#);
+        
+        let nav_actions = [
+            "Scroll Up", "Scroll Down", "Page Up", "Page Down", 
+            "Go to Top", "Go to Bottom"
+        ];
+        for action in &nav_actions {
+            if let Some(keys) = action_map.get(*action) {
+                html.push_str(&format!(
+                    "<tr><td><strong>{}</strong></td><td>",
+                    action
+                ));
+                for (i, key) in keys.iter().enumerate() {
+                    if i > 0 { html.push_str(" or "); }
+                    html.push_str(&format!("<span class='key'>{}</span>", 
+                        html_escape::encode_text(&key)));
+                }
+                html.push_str("</td></tr>\n");
+            }
+        }
+        html.push_str("</table></div>");
+        
+        // Zoom section
+        html.push_str(r#"<div class="section">
+<h2>Zoom</h2>
+<table>
+<tr><th style="width: 40%">Action</th><th>Keys</th></tr>"#);
+        
+        let zoom_actions = ["Zoom In", "Zoom Out", "Reset Zoom"];
+        for action in &zoom_actions {
+            if let Some(keys) = action_map.get(*action) {
+                html.push_str(&format!(
+                    "<tr><td><strong>{}</strong></td><td>",
+                    action
+                ));
+                for (i, key) in keys.iter().enumerate() {
+                    if i > 0 { html.push_str(" or "); }
+                    html.push_str(&format!("<span class='key'>{}</span>", 
+                        html_escape::encode_text(&key)));
+                }
+                html.push_str("</td></tr>\n");
+            }
+        }
+        html.push_str("</table></div>");
+        
+        // File Operations section
+        html.push_str(r#"<div class="section">
+<h2>File Operations</h2>
+<table>
+<tr><th style="width: 40%">Action</th><th>Keys</th></tr>"#);
+        
+        let file_actions = ["Next File", "Previous File", "Copy Selection"];
+        for action in &file_actions {
+            if let Some(keys) = action_map.get(*action) {
+                html.push_str(&format!(
+                    "<tr><td><strong>{}</strong></td><td>",
+                    action
+                ));
+                for (i, key) in keys.iter().enumerate() {
+                    if i > 0 { html.push_str(" or "); }
+                    html.push_str(&format!("<span class='key'>{}</span>", 
+                        html_escape::encode_text(&key)));
+                }
+                html.push_str("</td></tr>\n");
+            }
+        }
+        html.push_str("</table></div>");
+        
+        // Application section
+        html.push_str(r#"<div class="section">
+<h2>Application</h2>
+<table>
+<tr><th style="width: 40%">Action</th><th>Keys</th></tr>"#);
+        
+        let app_actions = ["Toggle Help", "Quit"];
+        for action in &app_actions {
+            if let Some(keys) = action_map.get(*action) {
+                html.push_str(&format!(
+                    "<tr><td><strong>{}</strong></td><td>",
+                    action
+                ));
+                for (i, key) in keys.iter().enumerate() {
+                    if i > 0 { html.push_str(" or "); }
+                    html.push_str(&format!("<span class='key'>{}</span>", 
+                        html_escape::encode_text(&key)));
+                }
+                html.push_str("</td></tr>\n");
+            }
+        }
+        html.push_str("</table></div>");
+        
+        // Footer
+        html.push_str(r#"<div class="footer">
+Press any help key or <span class="key">ESC</span> to close this help
+</div>
+</body>
+</html>"#);
+        
+        html
     }
 
     pub fn position_queued_elements(
@@ -314,7 +476,7 @@ impl Inlyne {
     }
     
     fn show_help(&mut self) {
-        let help_content = self.get_help_markdown();
+        let help_content = self.get_help_html();
         self.element_queue.lock().clear();
         self.elements.clear();
         self.renderer.positioner.reserved_height = DEFAULT_PADDING * self.renderer.hidpi_scale;
