@@ -152,6 +152,7 @@ pub struct Inlyne {
     help_visible: bool,
     current_file_content: String,
     saved_scroll_y: f32,
+    pending_scroll_y: Option<f32>,
 }
 
 impl Inlyne {
@@ -235,13 +236,14 @@ impl Inlyne {
             help_visible: false,
             current_file_content: md_string,
             saved_scroll_y: 0.0,
+            pending_scroll_y: None,
         })
     }
 
     fn get_help_html(&self) -> String {
         use keybindings::action::{Action, HistDirection, VertDirection, Zoom};
         
-        // Convert keybindings to HTML
+        // Convert keybindings to markdown/HTML hybrid
         let keybindings: keybindings::Keybindings = self.opts.keybindings.clone().into();
         
         // Group keybindings by action
@@ -271,74 +273,13 @@ impl Inlyne {
                 .push(combo_str);
         }
         
-        // Build HTML with better styling
-        let mut html = String::from(r#"<!DOCTYPE html>
-<html>
-<head>
-<style>
-body {
-    font-family: system-ui, -apple-system, sans-serif;
-    max-width: 800px;
-    margin: 0 auto;
-    padding: 20px;
-}
-h1 {
-    text-align: center;
-    color: #2563eb;
-    border-bottom: 3px solid #2563eb;
-    padding-bottom: 10px;
-}
-.section {
-    margin: 20px 0;
-}
-h2 {
-    color: #1e40af;
-    border-bottom: 1px solid #e5e7eb;
-    padding-bottom: 5px;
-}
-table {
-    width: 100%;
-    border-collapse: collapse;
-    margin: 10px 0;
-}
-th {
-    text-align: left;
-    background-color: #f3f4f6;
-    padding: 12px;
-    font-weight: 600;
-}
-td {
-    padding: 10px 12px;
-    border-bottom: 1px solid #e5e7eb;
-}
-.key {
-    background-color: #f3f4f6;
-    padding: 3px 8px;
-    border-radius: 4px;
-    font-family: monospace;
-    font-size: 0.9em;
-    margin: 0 2px;
-    display: inline-block;
-}
-.footer {
-    text-align: center;
-    margin-top: 30px;
-    padding-top: 20px;
-    border-top: 1px solid #e5e7eb;
-    color: #6b7280;
-    font-style: italic;
-}
-</style>
-</head>
-<body>
-<h1>⌨️ Keyboard Shortcuts</h1>
-"#);
+        // Build markdown with inline HTML
+        let mut content = String::from("# ⌨️ Keyboard Shortcuts\n\n");
         
         // Navigation section
-        html.push_str(r#"<div class="section">
-<h2>Navigation</h2>
-<table>
-<tr><th style="width: 40%">Action</th><th>Keys</th></tr>"#);
+        content.push_str("## Navigation\n");
+        content.push_str("<table>\n");
+        content.push_str("<tr><th><strong>Action</strong></th><th><strong>Keys</strong></th></tr>\n");
         
         let nav_actions = [
             "Scroll Up", "Scroll Down", "Page Up", "Page Down", 
@@ -346,97 +287,89 @@ td {
         ];
         for action in &nav_actions {
             if let Some(keys) = action_map.get(*action) {
-                html.push_str(&format!(
-                    "<tr><td><strong>{}</strong></td><td>",
-                    action
-                ));
+                content.push_str("<tr><td>");
+                content.push_str(action);
+                content.push_str("</td><td>");
                 for (i, key) in keys.iter().enumerate() {
-                    if i > 0 { html.push_str(" or "); }
-                    html.push_str(&format!("<span class='key'>{}</span>", 
+                    if i > 0 { content.push_str(" <em>or</em> "); }
+                    content.push_str(&format!("<code>{}</code>", 
                         html_escape::encode_text(&key)));
                 }
-                html.push_str("</td></tr>\n");
+                content.push_str("</td></tr>\n");
             }
         }
-        html.push_str("</table></div>");
+        content.push_str("</table>\n\n");
         
         // Zoom section
-        html.push_str(r#"<div class="section">
-<h2>Zoom</h2>
-<table>
-<tr><th style="width: 40%">Action</th><th>Keys</th></tr>"#);
+        content.push_str("## Zoom\n");
+        content.push_str("<table>\n");
+        content.push_str("<tr><th><strong>Action</strong></th><th><strong>Keys</strong></th></tr>\n");
         
         let zoom_actions = ["Zoom In", "Zoom Out", "Reset Zoom"];
         for action in &zoom_actions {
             if let Some(keys) = action_map.get(*action) {
-                html.push_str(&format!(
-                    "<tr><td><strong>{}</strong></td><td>",
-                    action
-                ));
+                content.push_str("<tr><td>");
+                content.push_str(action);
+                content.push_str("</td><td>");
                 for (i, key) in keys.iter().enumerate() {
-                    if i > 0 { html.push_str(" or "); }
-                    html.push_str(&format!("<span class='key'>{}</span>", 
+                    if i > 0 { content.push_str(" <em>or</em> "); }
+                    content.push_str(&format!("<code>{}</code>", 
                         html_escape::encode_text(&key)));
                 }
-                html.push_str("</td></tr>\n");
+                content.push_str("</td></tr>\n");
             }
         }
-        html.push_str("</table></div>");
+        content.push_str("</table>\n\n");
         
         // File Operations section
-        html.push_str(r#"<div class="section">
-<h2>File Operations</h2>
-<table>
-<tr><th style="width: 40%">Action</th><th>Keys</th></tr>"#);
+        content.push_str("## File Operations\n");
+        content.push_str("<table>\n");
+        content.push_str("<tr><th><strong>Action</strong></th><th><strong>Keys</strong></th></tr>\n");
         
         let file_actions = ["Next File", "Previous File", "Copy Selection"];
         for action in &file_actions {
             if let Some(keys) = action_map.get(*action) {
-                html.push_str(&format!(
-                    "<tr><td><strong>{}</strong></td><td>",
-                    action
-                ));
+                content.push_str("<tr><td>");
+                content.push_str(action);
+                content.push_str("</td><td>");
                 for (i, key) in keys.iter().enumerate() {
-                    if i > 0 { html.push_str(" or "); }
-                    html.push_str(&format!("<span class='key'>{}</span>", 
+                    if i > 0 { content.push_str(" <em>or</em> "); }
+                    content.push_str(&format!("<code>{}</code>", 
                         html_escape::encode_text(&key)));
                 }
-                html.push_str("</td></tr>\n");
+                content.push_str("</td></tr>\n");
             }
         }
-        html.push_str("</table></div>");
+        content.push_str("</table>\n\n");
         
         // Application section
-        html.push_str(r#"<div class="section">
-<h2>Application</h2>
-<table>
-<tr><th style="width: 40%">Action</th><th>Keys</th></tr>"#);
+        content.push_str("## Application\n");
+        content.push_str("<table>\n");
+        content.push_str("<tr><th><strong>Action</strong></th><th><strong>Keys</strong></th></tr>\n");
         
         let app_actions = ["Toggle Help", "Quit"];
         for action in &app_actions {
             if let Some(keys) = action_map.get(*action) {
-                html.push_str(&format!(
-                    "<tr><td><strong>{}</strong></td><td>",
-                    action
-                ));
+                content.push_str("<tr><td>");
+                content.push_str(action);
+                content.push_str("</td><td>");
                 for (i, key) in keys.iter().enumerate() {
-                    if i > 0 { html.push_str(" or "); }
-                    html.push_str(&format!("<span class='key'>{}</span>", 
+                    if i > 0 { content.push_str(" <em>or</em> "); }
+                    content.push_str(&format!("<code>{}</code>", 
                         html_escape::encode_text(&key)));
                 }
-                html.push_str("</td></tr>\n");
+                content.push_str("</td></tr>\n");
             }
         }
-        html.push_str("</table></div>");
+        content.push_str("</table>\n\n");
         
         // Footer
-        html.push_str(r#"<div class="footer">
-Press any help key or <span class="key">ESC</span> to close this help
-</div>
-</body>
-</html>"#);
+        content.push_str("---\n\n");
+        content.push_str("<div align=\"center\">\n");
+        content.push_str("<em>Press any help key or <code>ESC</code> to close this help</em>\n");
+        content.push_str("</div>\n");
         
-        html
+        content
     }
 
     pub fn position_queued_elements(
@@ -541,7 +474,13 @@ Press any help key or <span class="key">ESC</span> to close this help
                         &mut self.renderer,
                         &mut self.elements,
                     );
-                    self.renderer.set_scroll_y(self.renderer.scroll_y);
+                    
+                    // Apply pending scroll if we just loaded content
+                    if let Some(scroll_y) = self.pending_scroll_y.take() {
+                        self.renderer.set_scroll_y(scroll_y);
+                    } else {
+                        self.renderer.set_scroll_y(self.renderer.scroll_y);
+                    }
                     self.renderer
                         .redraw(&mut self.elements, &mut self.selection)
                         .context("Renderer failed to redraw the screen")
@@ -753,8 +692,8 @@ Press any help key or <span class="key">ESC</span> to close this help
                             } else {
                                 // Restore original content
                                 self.help_visible = false;
+                                self.pending_scroll_y = Some(self.saved_scroll_y);
                                 self.load_file(self.current_file_content.clone());
-                                self.renderer.set_scroll_y(self.saved_scroll_y);
                             }
                             self.window.request_redraw();
                         }
@@ -835,8 +774,8 @@ Press any help key or <span class="key">ESC</span> to close this help
                                     } else {
                                         // Restore original content
                                         self.help_visible = false;
+                                        self.pending_scroll_y = Some(self.saved_scroll_y);
                                         self.load_file(self.current_file_content.clone());
-                                        self.renderer.set_scroll_y(self.saved_scroll_y);
                                     }
                                     self.window.request_redraw();
                                 }
@@ -844,8 +783,8 @@ Press any help key or <span class="key">ESC</span> to close this help
                                     if self.help_visible {
                                         // Close help and restore content
                                         self.help_visible = false;
+                                        self.pending_scroll_y = Some(self.saved_scroll_y);
                                         self.load_file(self.current_file_content.clone());
-                                        self.renderer.set_scroll_y(self.saved_scroll_y);
                                         self.window.request_redraw();
                                     } else {
                                         *control_flow = ControlFlow::Exit;
