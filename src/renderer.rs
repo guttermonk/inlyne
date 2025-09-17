@@ -224,6 +224,7 @@ impl Renderer {
     }
 
     fn draw_help_popup(&mut self, keybindings: &[(String, String)]) -> anyhow::Result<()> {
+        tracing::debug!("Drawing help popup with {} keybindings", keybindings.len());
         let (screen_width, screen_height) = self.screen_size();
         
         // Draw semi-transparent overlay
@@ -909,11 +910,15 @@ impl Renderer {
 
         // Draw help popup if visible
         if help_visible {
+            tracing::debug!("Help popup is visible, preparing to render");
             // Prepare lyon buffer for help popup
             self.lyon_buffer.indices.clear();
             self.lyon_buffer.vertices.clear();
             
             self.draw_help_popup(keybindings)?;
+            tracing::debug!("Help popup drawn, vertices: {}, indices: {}", 
+                self.lyon_buffer.vertices.len(), 
+                self.lyon_buffer.indices.len());
             
             // Create buffers for help popup
             let help_vertex_buf = self
@@ -948,7 +953,9 @@ impl Renderer {
             help_rpass.set_pipeline(&self.render_pipeline);
             help_rpass.set_vertex_buffer(0, help_vertex_buf.slice(..));
             help_rpass.set_index_buffer(help_index_buffer.slice(..), wgpu::IndexFormat::Uint16);
-            help_rpass.draw_indexed(0..self.lyon_buffer.indices.len() as u32, 0, 0..1);
+            let indices_count = self.lyon_buffer.indices.len() as u32;
+            tracing::debug!("Drawing {} indices for help popup", indices_count);
+            help_rpass.draw_indexed(0..indices_count, 0, 0..1);
             
             // Explicitly drop the render pass before finishing the encoder
             drop(help_rpass);

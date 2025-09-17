@@ -141,7 +141,7 @@ code-highlighter = "github"
 # ]
 [keybindings]
 # The default keybindings include both normal and vim-like bindings
-# Press ? to show help with all current keybindings
+# Press h or ? to show help with all current keybindings
 
 # Base will override the defaults keybindings if set. Useful for when you want
 # to fully specify all of the keybindings

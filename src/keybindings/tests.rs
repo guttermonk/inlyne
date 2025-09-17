@@ -67,6 +67,7 @@ base = [
     ["Quit", "Escape"],
     ["Help", { key = "/", mod = ["Shift"] }],
     # Vim-like
+    ["Help", "h"],
     ["Copy", "y"],
     ["ScrollUp", "k"],
     ["ScrollDown", "j"],

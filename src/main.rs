@@ -251,7 +251,7 @@ impl Inlyne {
         bindings.push(("Copy Selection".to_string(), "Ctrl+C or y".to_string()));
         bindings.push(("Next File".to_string(), "Alt+→ or bn".to_string()));
         bindings.push(("Previous File".to_string(), "Alt+← or bp".to_string()));
-        bindings.push(("Toggle Help".to_string(), "?".to_string()));
+        bindings.push(("Toggle Help".to_string(), "h or ?".to_string()));
         bindings.push(("Quit".to_string(), "Esc or q".to_string()));
         
         bindings

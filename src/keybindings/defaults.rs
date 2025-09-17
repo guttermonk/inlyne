@@ -93,6 +93,8 @@ pub fn defaults() -> Vec<(Action, KeyCombo)> {
             )]),
         ),
         // vim-like bindings
+        // Help: h
+        (Action::Help, KeyCombo::from(VirtKey::H)),
         // Copy: y
         (Action::Copy, KeyCombo::from(VirtKey::Y)),
         // Scroll up: k
