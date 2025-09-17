@@ -150,6 +150,8 @@ pub struct Inlyne {
     watcher: Watcher,
     selection: Selection,
     help_visible: bool,
+    current_file_content: String,
+    saved_scroll_y: f32,
 }
 
 impl Inlyne {
@@ -208,7 +210,7 @@ impl Inlyne {
         let (interpreter_sender, interpreter_receiver) = channel();
         std::thread::spawn(move || interpreter.interpret_md(interpreter_receiver));
 
-        interpreter_sender.send(md_string)?;
+        interpreter_sender.send(md_string.clone())?;
 
         let lines_to_scroll = opts.lines_to_scroll;
 
@@ -231,30 +233,48 @@ impl Inlyne {
             watcher,
             selection: Selection::new(),
             help_visible: false,
+            current_file_content: md_string,
+            saved_scroll_y: 0.0,
         })
     }
 
-    fn get_formatted_keybindings(&self) -> Vec<(String, String)> {
-        let mut bindings = Vec::new();
+    fn get_help_markdown(&self) -> String {
+        let markdown = r#"# Keyboard Shortcuts
+
+## Navigation
+| Action | Keys |
+|--------|------|
+| **Scroll Up** | `↑` or `k` |
+| **Scroll Down** | `↓` or `j` |
+| **Page Up** | `PageUp` |
+| **Page Down** | `PageDown` |
+| **Go to Top** | `Home` or `gg` |
+| **Go to Bottom** | `End` or `G` |
+
+## Zoom
+| Action | Keys |
+|--------|------|
+| **Zoom In** | `Ctrl+=` or `Cmd+=` |
+| **Zoom Out** | `Ctrl+-` or `Cmd+-` |
+| **Reset Zoom** | `Ctrl+0` or `Cmd+0` |
+
+## File Operations
+| Action | Keys |
+|--------|------|
+| **Next File** | `Alt+→` or `bn` |
+| **Previous File** | `Alt+←` or `bp` |
+| **Copy Selection** | `Ctrl+C` or `y` |
+
+## Application
+| Action | Keys |
+|--------|------|
+| **Toggle Help** | `h` or `?` |
+| **Quit** | `Esc` or `q` |
+
+---
+*Press `h`, `?`, or `Esc` to close this help*"#;
         
-        // Get the keybindings from keycombos
-        // Format: (action_description, key_combination)
-        bindings.push(("Scroll Up".to_string(), "↑ or k".to_string()));
-        bindings.push(("Scroll Down".to_string(), "↓ or j".to_string()));
-        bindings.push(("Page Up".to_string(), "PageUp".to_string()));
-        bindings.push(("Page Down".to_string(), "PageDown".to_string()));
-        bindings.push(("Go to Top".to_string(), "Home or gg".to_string()));
-        bindings.push(("Go to Bottom".to_string(), "End or G".to_string()));
-        bindings.push(("Zoom In".to_string(), "Ctrl+= or Cmd+=".to_string()));
-        bindings.push(("Zoom Out".to_string(), "Ctrl+- or Cmd+-".to_string()));
-        bindings.push(("Reset Zoom".to_string(), "Ctrl+0 or Cmd+0".to_string()));
-        bindings.push(("Copy Selection".to_string(), "Ctrl+C or y".to_string()));
-        bindings.push(("Next File".to_string(), "Alt+→ or bn".to_string()));
-        bindings.push(("Previous File".to_string(), "Alt+← or bp".to_string()));
-        bindings.push(("Toggle Help".to_string(), "h or ?".to_string()));
-        bindings.push(("Quit".to_string(), "Esc or q".to_string()));
-        
-        bindings
+        markdown.to_string()
     }
 
     pub fn position_queued_elements(
@@ -285,11 +305,21 @@ impl Inlyne {
     }
 
     fn load_file(&mut self, contents: String) {
+        self.current_file_content = contents.clone();
         self.element_queue.lock().clear();
         self.elements.clear();
         self.renderer.positioner.reserved_height = DEFAULT_PADDING * self.renderer.hidpi_scale;
         self.renderer.positioner.anchors.clear();
         self.interpreter_sender.send(contents).unwrap();
+    }
+    
+    fn show_help(&mut self) {
+        let help_content = self.get_help_markdown();
+        self.element_queue.lock().clear();
+        self.elements.clear();
+        self.renderer.positioner.reserved_height = DEFAULT_PADDING * self.renderer.hidpi_scale;
+        self.renderer.positioner.anchors.clear();
+        self.interpreter_sender.send(help_content).unwrap();
     }
 
     fn update_file(&mut self, path: &Path, contents: String) {
@@ -350,13 +380,8 @@ impl Inlyne {
                         &mut self.elements,
                     );
                     self.renderer.set_scroll_y(self.renderer.scroll_y);
-                    let keybindings = if self.help_visible {
-                        self.get_formatted_keybindings()
-                    } else {
-                        Vec::new()
-                    };
                     self.renderer
-                        .redraw(&mut self.elements, &mut self.selection, self.help_visible, &keybindings)
+                        .redraw(&mut self.elements, &mut self.selection)
                         .context("Renderer failed to redraw the screen")
                         .unwrap();
 
@@ -558,8 +583,17 @@ impl Inlyne {
                     WindowEvent::ReceivedCharacter(c) => {
                         // Handle '?' character directly for better keyboard layout compatibility
                         if c == '?' {
-                            self.help_visible = !self.help_visible;
-                            tracing::debug!("Help popup toggled via '?' character: {}", if self.help_visible { "shown" } else { "hidden" });
+                            if !self.help_visible {
+                                // Save scroll position and show help
+                                self.saved_scroll_y = self.renderer.scroll_y;
+                                self.help_visible = true;
+                                self.show_help();
+                            } else {
+                                // Restore original content
+                                self.help_visible = false;
+                                self.load_file(self.current_file_content.clone());
+                                self.renderer.set_scroll_y(self.saved_scroll_y);
+                            }
                             self.window.request_redraw();
                         }
                     }
@@ -631,14 +665,25 @@ impl Inlyne {
                                 Action::Copy => clipboard
                                     .set_contents(self.selection.text.trim().to_owned()),
                                 Action::Help => {
-                                    self.help_visible = !self.help_visible;
-                                    tracing::debug!("Help popup toggled: {}", if self.help_visible { "shown" } else { "hidden" });
+                                    if !self.help_visible {
+                                        // Save scroll position and show help
+                                        self.saved_scroll_y = self.renderer.scroll_y;
+                                        self.help_visible = true;
+                                        self.show_help();
+                                    } else {
+                                        // Restore original content
+                                        self.help_visible = false;
+                                        self.load_file(self.current_file_content.clone());
+                                        self.renderer.set_scroll_y(self.saved_scroll_y);
+                                    }
                                     self.window.request_redraw();
                                 }
                                 Action::Quit => {
                                     if self.help_visible {
+                                        // Close help and restore content
                                         self.help_visible = false;
-                                        tracing::debug!("Closing help popup");
+                                        self.load_file(self.current_file_content.clone());
+                                        self.renderer.set_scroll_y(self.saved_scroll_y);
                                         self.window.request_redraw();
                                     } else {
                                         *control_flow = ControlFlow::Exit;
