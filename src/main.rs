@@ -624,9 +624,18 @@ impl Inlyne {
                                     .set_contents(self.selection.text.trim().to_owned()),
                                 Action::Help => {
                                     self.help_visible = !self.help_visible;
+                                    tracing::debug!("Help popup toggled: {}", if self.help_visible { "shown" } else { "hidden" });
                                     self.window.request_redraw();
                                 }
-                                Action::Quit => *control_flow = ControlFlow::Exit,
+                                Action::Quit => {
+                                    if self.help_visible {
+                                        self.help_visible = false;
+                                        tracing::debug!("Closing help popup");
+                                        self.window.request_redraw();
+                                    } else {
+                                        *control_flow = ControlFlow::Exit;
+                                    }
+                                }
                                 Action::History(hist_dir) => {
                                     let changed_path = match hist_dir {
                                         HistDirection::Next => self.opts.history.next(),

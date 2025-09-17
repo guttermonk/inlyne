@@ -223,22 +223,28 @@ impl Renderer {
         self.theme.scrollbar_width as f32
     }
 
-    fn draw_help_popup(&mut self, _keybindings: &[(String, String)]) -> anyhow::Result<()> {
+    fn draw_help_popup(&mut self, keybindings: &[(String, String)]) -> anyhow::Result<()> {
         let (screen_width, screen_height) = self.screen_size();
         
         // Draw semi-transparent overlay
         self.draw_rectangle(
             Rect::new((0.0, 0.0), (screen_width, screen_height)),
-            [0.0, 0.0, 0.0, 0.7],
+            [0.0, 0.0, 0.0, 0.5],
         )?;
         
         // Calculate popup dimensions
-        let popup_width = (screen_width * 0.8).min(800.0);
-        let popup_height = (screen_height * 0.8).min(600.0);
+        let popup_width = (screen_width * 0.6).min(600.0);
+        let popup_height = (screen_height * 0.8).min(700.0);
         let popup_x = (screen_width - popup_width) / 2.0;
         let popup_y = (screen_height - popup_height) / 2.0;
         
-        // Draw popup background
+        // Draw popup background with shadow effect
+        let shadow_offset = 4.0 * self.hidpi_scale;
+        self.draw_rectangle(
+            Rect::new((popup_x + shadow_offset, popup_y + shadow_offset), (popup_width, popup_height)),
+            [0.0, 0.0, 0.0, 0.3],
+        )?;
+        
         let bg_color = native_color(self.theme.background_color, &self.surface_format);
         self.draw_rectangle(
             Rect::new((popup_x, popup_y), (popup_width, popup_height)),
@@ -250,19 +256,82 @@ impl Renderer {
         self.stroke_rectangle(
             Rect::new((popup_x, popup_y), (popup_width, popup_height)),
             border_color,
-            2.0 * self.hidpi_scale,
+            3.0 * self.hidpi_scale,
         )?;
         
-        // Draw title
-        let title_y = popup_y + 30.0 * self.hidpi_scale;
+        // Draw title bar
+        let title_height = 50.0 * self.hidpi_scale;
+        let accent_color = native_color(self.theme.link_color, &self.surface_format);
         self.draw_rectangle(
-            Rect::new((popup_x, title_y), (popup_width, 2.0 * self.hidpi_scale)),
+            Rect::new((popup_x, popup_y), (popup_width, title_height)),
+            accent_color,
+        )?;
+        
+        // Draw title separator
+        self.draw_rectangle(
+            Rect::new((popup_x, popup_y + title_height), (popup_width, 2.0 * self.hidpi_scale)),
             border_color,
         )?;
         
-        // Note: Text rendering would require more complex setup with the text system
-        // For now, we just draw the popup box as a placeholder
-        // In a full implementation, we would use the text system to render the keybindings
+        // Draw "KEYBOARD SHORTCUTS" indicator in title area (visual placeholder)
+        let indicator_width = 20.0 * self.hidpi_scale;
+        let indicator_height = 20.0 * self.hidpi_scale;
+        let indicator_x = popup_x + popup_width / 2.0 - indicator_width / 2.0;
+        let indicator_y = popup_y + title_height / 2.0 - indicator_height / 2.0;
+        self.draw_rectangle(
+            Rect::new((indicator_x, indicator_y), (indicator_width, indicator_height)),
+            bg_color,
+        )?;
+        self.draw_rectangle(
+            Rect::new((indicator_x + 2.0, indicator_y + 2.0), (indicator_width - 4.0, indicator_height - 4.0)),
+            accent_color,
+        )?;
+        
+        // Draw content area with visual indicators for keybindings
+        let content_y = popup_y + title_height + 20.0 * self.hidpi_scale;
+        let line_height = 30.0 * self.hidpi_scale;
+        let column_width = popup_width / 2.0;
+        
+        // Draw visual placeholders for keybinding entries
+        for (i, _binding) in keybindings.iter().enumerate().take(15) {
+            let row = i % 8;
+            let col = i / 8;
+            let x = popup_x + 20.0 * self.hidpi_scale + col as f32 * column_width;
+            let y = content_y + row as f32 * line_height;
+            
+            // Draw key indicator box
+            let key_box_width = 60.0 * self.hidpi_scale;
+            let key_box_height = 20.0 * self.hidpi_scale;
+            self.stroke_rectangle(
+                Rect::new((x, y), (key_box_width, key_box_height)),
+                border_color,
+                1.0 * self.hidpi_scale,
+            )?;
+            
+            // Draw action indicator line
+            let action_x = x + key_box_width + 10.0 * self.hidpi_scale;
+            let action_width = column_width - key_box_width - 30.0 * self.hidpi_scale;
+            self.draw_rectangle(
+                Rect::new((action_x, y + key_box_height / 2.0 - 1.0), (action_width, 2.0)),
+                [border_color[0], border_color[1], border_color[2], 0.3],
+            )?;
+        }
+        
+        // Draw close instruction at bottom
+        let footer_y = popup_y + popup_height - 40.0 * self.hidpi_scale;
+        self.draw_rectangle(
+            Rect::new((popup_x, footer_y - 2.0), (popup_width, 2.0 * self.hidpi_scale)),
+            border_color,
+        )?;
+        
+        // Draw ESC indicator
+        let esc_box_x = popup_x + popup_width / 2.0 - 30.0 * self.hidpi_scale;
+        let esc_box_y = footer_y + 10.0 * self.hidpi_scale;
+        self.stroke_rectangle(
+            Rect::new((esc_box_x, esc_box_y), (60.0 * self.hidpi_scale, 20.0 * self.hidpi_scale)),
+            border_color,
+            2.0 * self.hidpi_scale,
+        )?;
         
         Ok(())
     }
@@ -880,6 +949,9 @@ impl Renderer {
             help_rpass.set_vertex_buffer(0, help_vertex_buf.slice(..));
             help_rpass.set_index_buffer(help_index_buffer.slice(..), wgpu::IndexFormat::Uint16);
             help_rpass.draw_indexed(0..self.lyon_buffer.indices.len() as u32, 0, 0..1);
+            
+            // Explicitly drop the render pass before finishing the encoder
+            drop(help_rpass);
         }
 
         self.queue.submit(Some(encoder.finish()));
