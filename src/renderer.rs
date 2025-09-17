@@ -227,11 +227,8 @@ impl Renderer {
         tracing::debug!("Drawing help popup with {} keybindings", keybindings.len());
         let (screen_width, screen_height) = self.screen_size();
         
-        // Draw semi-transparent overlay to darken the document behind
-        self.draw_rectangle(
-            Rect::new((0.0, 0.0), (screen_width, screen_height)),
-            [0.0, 0.0, 0.0, 0.5], // 50% transparent black
-        )?;
+        // Don't draw a full overlay - let the document show through
+        // We'll only draw the popup itself with a stronger shadow
         
         // Calculate popup dimensions
         let popup_width = (screen_width * 0.65).min(650.0).max(450.0);
@@ -239,12 +236,15 @@ impl Renderer {
         let popup_x = (screen_width - popup_width) / 2.0;
         let popup_y = (screen_height - popup_height) / 2.0;
         
-        // Draw popup shadow
-        let shadow_offset = 6.0 * self.hidpi_scale;
-        self.draw_rectangle(
-            Rect::new((popup_x + shadow_offset, popup_y + shadow_offset), (popup_width, popup_height)),
-            [0.0, 0.0, 0.0, 0.5],
-        )?;
+        // Draw stronger shadow for better contrast without overlay
+        for i in 0..3 {
+            let offset = (3 - i) as f32 * 3.0 * self.hidpi_scale;
+            let alpha = 0.2 + (i as f32 * 0.1);
+            self.draw_rectangle(
+                Rect::new((popup_x + offset, popup_y + offset), (popup_width, popup_height)),
+                [0.0, 0.0, 0.0, alpha],
+            )?;
+        }
         
         // Draw popup background
         let bg_color = native_color(self.theme.background_color, &self.surface_format);
@@ -270,20 +270,10 @@ impl Renderer {
             accent_color,
         )?;
         
-        // Draw title text "KEYBOARD SHORTCUTS" using visual representation
-        let title_text = "KEYBOARD SHORTCUTS";
-        let title_x = popup_x + popup_width / 2.0 - 90.0 * self.hidpi_scale;
-        let title_y = popup_y + title_height / 2.0 - 6.0 * self.hidpi_scale;
-        
-        // Draw stylized text representation for title
-        for (i, _) in title_text.chars().enumerate() {
-            let char_x = title_x + i as f32 * 10.0 * self.hidpi_scale;
-            let char_height = 12.0 * self.hidpi_scale;
-            self.draw_rectangle(
-                Rect::new((char_x, title_y), (8.0 * self.hidpi_scale, char_height)),
-                bg_color,
-            )?;
-        }
+        // Draw title "KEYBOARD SHORTCUTS" with better visual representation
+        let title_x = popup_x + popup_width / 2.0 - 85.0 * self.hidpi_scale;
+        let title_y = popup_y + title_height / 2.0 - 8.0 * self.hidpi_scale;
+        self.draw_readable_text(title_x, title_y, "KEYBOARD SHORTCUTS", bg_color, 1.2)?;
         
         // Draw title separator
         self.draw_rectangle(
@@ -298,21 +288,21 @@ impl Renderer {
         let line_height = 28.0 * self.hidpi_scale;
         let column_width = (popup_width - content_padding * 2.0) / 2.0;
         
-        // Define the actual keybindings to display
+        // Define the actual keybindings to display with clearer formatting
         let bindings = [
-            ("↑/k", "Scroll Up"),
-            ("↓/j", "Scroll Down"),
+            ("Up / k", "Scroll Up"),
+            ("Down / j", "Scroll Down"),
             ("PgUp", "Page Up"),
             ("PgDn", "Page Down"),
-            ("Home/gg", "Top"),
-            ("End/G", "Bottom"),
-            ("Ctrl+=", "Zoom In"),
-            ("Ctrl+-", "Zoom Out"),
-            ("Ctrl+C/y", "Copy"),
-            ("Alt+→/bn", "Next File"),
-            ("Alt+←/bp", "Prev File"),
-            ("h/?", "Help"),
-            ("Esc/q", "Quit"),
+            ("Home / gg", "Go to Top"),
+            ("End / G", "Go to Bottom"),
+            ("Ctrl + =", "Zoom In"),
+            ("Ctrl + -", "Zoom Out"),
+            ("Ctrl+C / y", "Copy Selection"),
+            ("Alt+Right / bn", "Next File"),
+            ("Alt+Left / bp", "Previous File"),
+            ("h / ?", "Toggle Help"),
+            ("Esc / q", "Quit Application"),
         ];
         
         // Draw keybinding entries
@@ -340,12 +330,12 @@ impl Renderer {
                 1.5 * self.hidpi_scale,
             )?;
             
-            // Draw visual representation of key text
-            self.draw_text_blocks(x + 5.0 * self.hidpi_scale, y + 5.0 * self.hidpi_scale, key, accent_color)?;
+            // Draw readable key text
+            self.draw_readable_text(x + 6.0 * self.hidpi_scale, y + 4.0 * self.hidpi_scale, key, accent_color, 0.9)?;
             
-            // Draw action text representation
+            // Draw readable action text
             let action_x = x + key_width + 15.0 * self.hidpi_scale;
-            self.draw_text_blocks(action_x, y + 3.0 * self.hidpi_scale, action, text_color)?;
+            self.draw_readable_text(action_x, y + 2.0 * self.hidpi_scale, action, text_color, 1.0)?;
         }
         
         // Footer
@@ -355,48 +345,156 @@ impl Renderer {
             text_color,
         )?;
         
-        // Draw footer text representation
+        // Draw footer text with better representation
         let footer_text = "Press h, ?, or ESC to close";
-        let footer_x = popup_x + popup_width / 2.0 - 90.0 * self.hidpi_scale;
-        self.draw_text_blocks(footer_x, footer_y + 8.0 * self.hidpi_scale, footer_text, 
-            [text_color[0] * 0.7, text_color[1] * 0.7, text_color[2] * 0.7, 1.0])?;
+        let footer_x = popup_x + popup_width / 2.0 - 85.0 * self.hidpi_scale;
+        let footer_color = [text_color[0] * 0.7, text_color[1] * 0.7, text_color[2] * 0.7, 1.0];
+        self.draw_readable_text(footer_x, footer_y + 7.0 * self.hidpi_scale, footer_text, footer_color, 0.95)?;
         
         Ok(())
     }
     
-    // Helper function to draw visual text blocks
-    fn draw_text_blocks(&mut self, x: f32, y: f32, text: &str, color: [f32; 4]) -> anyhow::Result<()> {
-        // Special handling for arrow symbols
-        if text.contains("↑") {
-            // Up arrow visual
-            let arrow_x = x;
-            let arrow_y = y + 2.0 * self.hidpi_scale;
-            self.draw_rectangle(Rect::new((arrow_x + 2.0, arrow_y), (3.0 * self.hidpi_scale, 8.0 * self.hidpi_scale)), color)?;
-            self.draw_rectangle(Rect::new((arrow_x, arrow_y - 2.0), (7.0 * self.hidpi_scale, 3.0 * self.hidpi_scale)), color)?;
-            return Ok(());
-        } else if text.contains("↓") {
-            // Down arrow visual
-            let arrow_x = x;
-            let arrow_y = y + 2.0 * self.hidpi_scale;
-            self.draw_rectangle(Rect::new((arrow_x + 2.0, arrow_y), (3.0 * self.hidpi_scale, 8.0 * self.hidpi_scale)), color)?;
-            self.draw_rectangle(Rect::new((arrow_x, arrow_y + 7.0), (7.0 * self.hidpi_scale, 3.0 * self.hidpi_scale)), color)?;
-            return Ok(());
-        }
+    // Helper function to draw readable text using letter-like shapes
+    fn draw_readable_text(&mut self, x: f32, y: f32, text: &str, color: [f32; 4], scale: f32) -> anyhow::Result<()> {
+        let base_size = self.hidpi_scale * scale;
+        let char_width = 6.0 * base_size;
+        let char_spacing = 1.5 * base_size;
+        let mut current_x = x;
         
-        // For regular text, draw blocks to represent characters
-        let char_width = 5.0 * self.hidpi_scale;
-        let char_spacing = 2.0 * self.hidpi_scale;
-        let max_chars = text.len().min(20);
-        
-        for i in 0..max_chars {
-            let char_x = x + i as f32 * (char_width + char_spacing);
-            let char_height = (7.0 + (i % 2) as f32 * 2.0) * self.hidpi_scale;
-            let char_y_offset = if i % 2 == 0 { 0.0 } else { 1.0 * self.hidpi_scale };
-            
-            self.draw_rectangle(
-                Rect::new((char_x, y + char_y_offset), (char_width, char_height)),
-                [color[0], color[1], color[2], color[3] * 0.9],
-            )?;
+        for ch in text.chars() {
+            match ch {
+                ' ' => {
+                    current_x += char_width * 0.7;
+                },
+                'A'..='Z' | 'a'..='z' => {
+                    // Draw letter representation - vertical line with horizontal variations
+                    let h = 10.0 * base_size;
+                    let w = 5.0 * base_size;
+                    
+                    // Main vertical stroke
+                    self.draw_rectangle(
+                        Rect::new((current_x, y), (1.5 * base_size, h)),
+                        color,
+                    )?;
+                    
+                    // Top horizontal for certain letters
+                    if "AEFHPRT".contains(ch.to_ascii_uppercase()) {
+                        self.draw_rectangle(
+                            Rect::new((current_x, y), (w, 1.5 * base_size)),
+                            color,
+                        )?;
+                    }
+                    
+                    // Middle horizontal for certain letters
+                    if "AEFHPRS".contains(ch.to_ascii_uppercase()) {
+                        self.draw_rectangle(
+                            Rect::new((current_x, y + h * 0.45), (w * 0.8, 1.5 * base_size)),
+                            color,
+                        )?;
+                    }
+                    
+                    // Bottom horizontal for certain letters
+                    if "CDEGLOZ".contains(ch.to_ascii_uppercase()) {
+                        self.draw_rectangle(
+                            Rect::new((current_x, y + h - 1.5 * base_size), (w, 1.5 * base_size)),
+                            color,
+                        )?;
+                    }
+                    
+                    // Right vertical for certain letters
+                    if "BDHMNU".contains(ch.to_ascii_uppercase()) {
+                        self.draw_rectangle(
+                            Rect::new((current_x + w - 1.5 * base_size, y), (1.5 * base_size, h)),
+                            color,
+                        )?;
+                    }
+                    
+                    current_x += char_width + char_spacing;
+                },
+                '0'..='9' => {
+                    // Draw number representation - oval-like shape
+                    let h = 10.0 * base_size;
+                    let w = 5.0 * base_size;
+                    
+                    // Top and bottom
+                    self.draw_rectangle(Rect::new((current_x + base_size, y), (w - 2.0 * base_size, 1.5 * base_size)), color)?;
+                    self.draw_rectangle(Rect::new((current_x + base_size, y + h - 1.5 * base_size), (w - 2.0 * base_size, 1.5 * base_size)), color)?;
+                    
+                    // Sides
+                    self.draw_rectangle(Rect::new((current_x, y + base_size), (1.5 * base_size, h - 2.0 * base_size)), color)?;
+                    self.draw_rectangle(Rect::new((current_x + w - 1.5 * base_size, y + base_size), (1.5 * base_size, h - 2.0 * base_size)), color)?;
+                    
+                    current_x += char_width + char_spacing;
+                },
+                '+' | '-' | '=' => {
+                    // Draw operator symbols
+                    let h = 10.0 * base_size;
+                    let w = 5.0 * base_size;
+                    
+                    if ch == '-' || ch == '=' {
+                        self.draw_rectangle(
+                            Rect::new((current_x, y + h * 0.45), (w, 1.5 * base_size)),
+                            color,
+                        )?;
+                    }
+                    
+                    if ch == '+' {
+                        self.draw_rectangle(
+                            Rect::new((current_x, y + h * 0.45), (w, 1.5 * base_size)),
+                            color,
+                        )?;
+                        self.draw_rectangle(
+                            Rect::new((current_x + w * 0.4, y + h * 0.2), (1.5 * base_size, h * 0.6)),
+                            color,
+                        )?;
+                    }
+                    
+                    if ch == '=' {
+                        self.draw_rectangle(
+                            Rect::new((current_x, y + h * 0.35), (w, 1.2 * base_size)),
+                            color,
+                        )?;
+                        self.draw_rectangle(
+                            Rect::new((current_x, y + h * 0.55), (w, 1.2 * base_size)),
+                            color,
+                        )?;
+                    }
+                    
+                    current_x += char_width + char_spacing;
+                },
+                '/' | '?' => {
+                    // Draw slash or question mark
+                    let h = 10.0 * base_size;
+                    let w = 5.0 * base_size;
+                    
+                    // Diagonal line for slash
+                    for i in 0..5 {
+                        let offset = i as f32 * 2.0 * base_size;
+                        self.draw_rectangle(
+                            Rect::new((current_x + offset * 0.5, y + offset), (1.5 * base_size, 2.5 * base_size)),
+                            color,
+                        )?;
+                    }
+                    
+                    if ch == '?' {
+                        // Add dot at bottom for question mark
+                        self.draw_rectangle(
+                            Rect::new((current_x + w * 0.4, y + h - 2.0 * base_size), (2.0 * base_size, 2.0 * base_size)),
+                            color,
+                        )?;
+                    }
+                    
+                    current_x += char_width + char_spacing;
+                },
+                _ => {
+                    // For other characters, draw a simple box
+                    self.draw_rectangle(
+                        Rect::new((current_x, y + 3.0 * base_size), (4.0 * base_size, 4.0 * base_size)),
+                        [color[0], color[1], color[2], color[3] * 0.5],
+                    )?;
+                    current_x += char_width + char_spacing;
+                }
+            }
         }
         
         Ok(())
