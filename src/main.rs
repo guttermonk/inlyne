@@ -150,9 +150,10 @@ pub struct Inlyne {
     watcher: Watcher,
     selection: Selection,
     help_visible: bool,
-    current_file_content: String,
+    help_elements: Vec<Positioned<Element>>,
+    help_element_queue: Arc<Mutex<Vec<Element>>>,
     saved_scroll_y: f32,
-    pending_scroll_y: Option<f32>,
+    current_file_content: String,
 }
 
 impl Inlyne {
@@ -234,9 +235,10 @@ impl Inlyne {
             watcher,
             selection: Selection::new(),
             help_visible: false,
-            current_file_content: md_string,
+            help_elements: Vec::new(),
+            help_element_queue: Arc::new(Mutex::new(Vec::new())),
             saved_scroll_y: 0.0,
-            pending_scroll_y: None,
+            current_file_content: md_string,
         })
     }
 
@@ -277,7 +279,7 @@ impl Inlyne {
         let mut content = String::from("# ⌨️ Keyboard Shortcuts\n\n");
         
         // Navigation section
-        content.push_str("## Navigation\n");
+        content.push_str("\n## Navigation");
         content.push_str("<table>\n");
         content.push_str("<tr><th><strong>Action</strong></th><th><strong>Keys</strong></th></tr>\n");
         
@@ -301,7 +303,7 @@ impl Inlyne {
         content.push_str("</table>\n\n");
         
         // Zoom section
-        content.push_str("## Zoom\n");
+        content.push_str("\n## Zoom");
         content.push_str("<table>\n");
         content.push_str("<tr><th><strong>Action</strong></th><th><strong>Keys</strong></th></tr>\n");
         
@@ -322,7 +324,7 @@ impl Inlyne {
         content.push_str("</table>\n\n");
         
         // File Operations section
-        content.push_str("## File Operations\n");
+        content.push_str("\n## File Operations");
         content.push_str("<table>\n");
         content.push_str("<tr><th><strong>Action</strong></th><th><strong>Keys</strong></th></tr>\n");
         
@@ -343,7 +345,7 @@ impl Inlyne {
         content.push_str("</table>\n\n");
         
         // Application section
-        content.push_str("## Application\n");
+        content.push_str("\n## Application");
         content.push_str("<table>\n");
         content.push_str("<tr><th><strong>Action</strong></th><th><strong>Keys</strong></th></tr>\n");
         
@@ -364,7 +366,7 @@ impl Inlyne {
         content.push_str("</table>\n\n");
         
         // Footer
-        content.push_str("---\n\n");
+        content.push_str("\n---\n");
         content.push_str("<div align=\"center\">\n");
         content.push_str("<em>Press any help key or <code>ESC</code> to close this help</em>\n");
         content.push_str("</div>\n");
@@ -409,12 +411,42 @@ impl Inlyne {
     }
     
     fn show_help(&mut self) {
+        // Save current scroll position
+        self.saved_scroll_y = self.renderer.scroll_y;
+        
+        // Create help interpreter with separate element queue
+        let help_interpreter = HtmlInterpreter::new(
+            Arc::clone(&self.window),
+            Arc::clone(&self.help_element_queue),
+            self.opts.theme.clone(),
+            self.renderer.surface_format,
+            self.renderer.hidpi_scale,
+            Arc::clone(&self.image_cache),
+            self.opts.color_scheme,
+        );
+        
+        // Load help content in separate thread
         let help_content = self.get_help_html();
-        self.element_queue.lock().clear();
-        self.elements.clear();
-        self.renderer.positioner.reserved_height = DEFAULT_PADDING * self.renderer.hidpi_scale;
-        self.renderer.positioner.anchors.clear();
-        self.interpreter_sender.send(help_content).unwrap();
+        let (help_sender, help_receiver) = channel();
+        std::thread::spawn(move || help_interpreter.interpret_md(help_receiver));
+        help_sender.send(help_content).unwrap();
+        
+        // Reset scroll for help view
+        self.renderer.set_scroll_y(0.0);
+        self.window.request_redraw();
+    }
+    
+    fn hide_help(&mut self) {
+        // Clear help elements
+        self.help_elements.clear();
+        self.help_element_queue.lock().clear();
+        
+        // Check if file content changed while help was visible
+        // If it did, we need to reload the document
+        // This is indicated by checking if current_file_content differs from what's displayed
+        // For now, just restore scroll position since elements are intact
+        self.renderer.set_scroll_y(self.saved_scroll_y);
+        self.window.request_redraw();
     }
 
     fn update_file(&mut self, path: &Path, contents: String) {
@@ -445,7 +477,14 @@ impl Inlyne {
                         self.need_repositioning = true;
                     }
                     InlyneEvent::FileReload => match read_to_string(self.opts.history.get_path()) {
-                        Ok(contents) => self.load_file(contents),
+                        Ok(contents) => {
+                            // Always update the content
+                            self.current_file_content = contents.clone();
+                            // Only reload if help isn't visible
+                            if !self.help_visible {
+                                self.load_file(contents);
+                            }
+                        }
                         Err(err) => {
                             tracing::warn!(
                                 "Failed reloading file at {}\nError: {}",
@@ -454,7 +493,14 @@ impl Inlyne {
                             );
                         }
                     },
-                    InlyneEvent::FileChange { contents } => self.load_file(contents),
+                    InlyneEvent::FileChange { contents } => {
+                        // Always update the content
+                        self.current_file_content = contents.clone();
+                        // Only reload if help isn't visible
+                        if !self.help_visible {
+                            self.load_file(contents);
+                        }
+                    }
                     InlyneEvent::Reposition => {
                         self.need_repositioning = true;
                     }
@@ -469,20 +515,33 @@ impl Inlyne {
                 },
                 Event::RedrawRequested(_) => {
                     let redraw_start = Instant::now();
-                    Self::position_queued_elements(
-                        &self.element_queue,
-                        &mut self.renderer,
-                        &mut self.elements,
-                    );
                     
-                    // Apply pending scroll if we just loaded content
-                    if let Some(scroll_y) = self.pending_scroll_y.take() {
-                        self.renderer.set_scroll_y(scroll_y);
+                    // Position the appropriate elements based on what's visible
+                    if self.help_visible {
+                        Self::position_queued_elements(
+                            &self.help_element_queue,
+                            &mut self.renderer,
+                            &mut self.help_elements,
+                        );
                     } else {
-                        self.renderer.set_scroll_y(self.renderer.scroll_y);
+                        Self::position_queued_elements(
+                            &self.element_queue,
+                            &mut self.renderer,
+                            &mut self.elements,
+                        );
                     }
+                    
+                    self.renderer.set_scroll_y(self.renderer.scroll_y);
+                    
+                    // Render the appropriate elements
+                    let elements_to_render = if self.help_visible {
+                        &mut self.help_elements
+                    } else {
+                        &mut self.elements
+                    };
+                    
                     self.renderer
-                        .redraw(&mut self.elements, &mut self.selection)
+                        .redraw(elements_to_render, &mut self.selection)
                         .context("Renderer failed to redraw the screen")
                         .unwrap();
 
@@ -685,17 +744,12 @@ impl Inlyne {
                         // Handle '?' character directly for better keyboard layout compatibility
                         if c == '?' {
                             if !self.help_visible {
-                                // Save scroll position and show help
-                                self.saved_scroll_y = self.renderer.scroll_y;
                                 self.help_visible = true;
                                 self.show_help();
                             } else {
-                                // Restore original content
                                 self.help_visible = false;
-                                self.pending_scroll_y = Some(self.saved_scroll_y);
-                                self.load_file(self.current_file_content.clone());
+                                self.hide_help();
                             }
-                            self.window.request_redraw();
                         }
                     }
                     WindowEvent::KeyboardInput {
@@ -767,25 +821,17 @@ impl Inlyne {
                                     .set_contents(self.selection.text.trim().to_owned()),
                                 Action::Help => {
                                     if !self.help_visible {
-                                        // Save scroll position and show help
-                                        self.saved_scroll_y = self.renderer.scroll_y;
                                         self.help_visible = true;
                                         self.show_help();
                                     } else {
-                                        // Restore original content
                                         self.help_visible = false;
-                                        self.pending_scroll_y = Some(self.saved_scroll_y);
-                                        self.load_file(self.current_file_content.clone());
+                                        self.hide_help();
                                     }
-                                    self.window.request_redraw();
                                 }
                                 Action::Quit => {
                                     if self.help_visible {
-                                        // Close help and restore content
                                         self.help_visible = false;
-                                        self.pending_scroll_y = Some(self.saved_scroll_y);
-                                        self.load_file(self.current_file_content.clone());
-                                        self.window.request_redraw();
+                                        self.hide_help();
                                     } else {
                                         *control_flow = ControlFlow::Exit;
                                     }
@@ -831,7 +877,11 @@ impl Inlyne {
                                 .surface
                                 .configure(&self.renderer.device, &self.renderer.config);
                             let old_reserved = self.renderer.positioner.reserved_height;
-                            self.renderer.reposition(&mut self.elements).unwrap();
+                            if self.help_visible {
+                                self.renderer.reposition(&mut self.help_elements).unwrap();
+                            } else {
+                                self.renderer.reposition(&mut self.elements).unwrap();
+                            }
                             let new_reserved = self.renderer.positioner.reserved_height;
                             self.renderer.set_scroll_y(
                                 self.renderer.scroll_y * (new_reserved / old_reserved),
@@ -841,7 +891,11 @@ impl Inlyne {
                     }
 
                     if self.need_repositioning {
-                        self.renderer.reposition(&mut self.elements).unwrap();
+                        if self.help_visible {
+                            self.renderer.reposition(&mut self.help_elements).unwrap();
+                        } else {
+                            self.renderer.reposition(&mut self.elements).unwrap();
+                        }
                         self.window.request_redraw();
                         self.need_repositioning = false;
                     }
