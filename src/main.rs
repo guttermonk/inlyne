@@ -64,7 +64,7 @@ use taffy::Taffy;
 use winit::event::{
     ElementState, Event, KeyboardInput, ModifiersState, MouseButton, MouseScrollDelta, WindowEvent,
 };
-use winit::event_loop::{ControlFlow, EventLoop, EventLoopBuilder};
+use winit::event_loop::{ControlFlow, EventLoop, EventLoopBuilder, EventLoopProxy};
 use winit::window::{CursorIcon, Window, WindowBuilder};
 
 pub enum InlyneEvent {
@@ -154,6 +154,7 @@ pub struct Inlyne {
     help_element_queue: Arc<Mutex<Vec<Element>>>,
     saved_scroll_y: f32,
     current_file_content: String,
+    event_loop_proxy: EventLoopProxy<InlyneEvent>,
 }
 
 impl Inlyne {
@@ -198,6 +199,7 @@ impl Inlyne {
         let md_string = read_to_string(&file_path)
             .with_context(|| format!("Could not read file at '{}'", file_path.display()))?;
 
+        let event_loop_proxy = event_loop.create_proxy();
         let interpreter = HtmlInterpreter::new(
             window.clone(),
             element_queue.clone(),
@@ -205,7 +207,7 @@ impl Inlyne {
             renderer.surface_format,
             renderer.hidpi_scale,
             image_cache.clone(),
-            event_loop.create_proxy(),
+            event_loop_proxy.clone(),
             opts.color_scheme,
         );
 
@@ -216,7 +218,7 @@ impl Inlyne {
 
         let lines_to_scroll = opts.lines_to_scroll;
 
-        let watcher = Watcher::spawn(event_loop.create_proxy(), file_path.clone());
+        let watcher = Watcher::spawn(event_loop_proxy.clone(), file_path.clone());
 
         let _ = file_path.parent().map(std::env::set_current_dir);
 
@@ -239,6 +241,7 @@ impl Inlyne {
             help_element_queue: Arc::new(Mutex::new(Vec::new())),
             saved_scroll_y: 0.0,
             current_file_content: md_string,
+            event_loop_proxy,
         })
     }
 
@@ -422,6 +425,7 @@ impl Inlyne {
             self.renderer.surface_format,
             self.renderer.hidpi_scale,
             Arc::clone(&self.image_cache),
+            self.event_loop_proxy.clone(),
             self.opts.color_scheme,
         );
         
