@@ -16,7 +16,7 @@ use crate::Element;
 
 use anyhow::{Context, Ok};
 use bytemuck::{Pod, Zeroable};
-use glyphon::{Resolution, SwashCache, TextArea, TextAtlas, TextRenderer};
+use glyphon::{SwashCache, TextArea, TextAtlas, TextRenderer};
 use lyon::geom::euclid::Point2D;
 use lyon::geom::Box2D;
 use lyon::path::Polygon;

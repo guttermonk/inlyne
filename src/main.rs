@@ -186,7 +186,7 @@ impl Inlyne {
             Arc::new(wb.build(&event_loop).unwrap())
         };
 
-        let renderer = pollster::block_on(Renderer::new(
+        let mut renderer = pollster::block_on(Renderer::new(
             &window,
             opts.theme.clone(),
             opts.scale.unwrap_or(window.scale_factor() as f32),
