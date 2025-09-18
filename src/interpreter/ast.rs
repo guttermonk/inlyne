@@ -74,6 +74,7 @@ trait Push<T> {
     fn push_spacer(&mut self);
     fn push_text_box(&mut self, global: &Static, element: &mut TextBox, state: State);
     fn push_image_from_picture(&mut self, global: &Static, state: State, picture: Picture);
+    fn len(&self) -> usize;
 }
 impl Push<Element> for Vec<Element> {
     fn push_element<I: Into<Element>>(&mut self, element: I) {
@@ -81,6 +82,9 @@ impl Push<Element> for Vec<Element> {
     }
     fn push_spacer(&mut self) {
         self.push_element(Spacer::invisible())
+    }
+    fn len(&self) -> usize {
+        Vec::len(self)
     }
     fn push_text_box(&mut self, global: &Static, element: &mut TextBox, state: State) {
         let mut tb = std::mem::replace(element, TextBox::new(vec![], global.opts.hidpi_scale));
@@ -140,6 +144,7 @@ impl Push<Element> for Dummy {
     fn push_spacer(&mut self) {}
     fn push_text_box(&mut self, _global: &Static, _element: &mut TextBox, _state: State) {}
     fn push_image_from_picture(&mut self, _global: &Static, _state: State, _picture: Picture) {}
+    fn len(&self) -> usize { 0 }
 }
 
 pub struct AstOpts {
@@ -398,6 +403,9 @@ impl Process for FlowProcess {
                 state.set_align_from_attributes(attributes);
                 element.set_align_or_default(state.text_options.align);
 
+                // Track output size before processing content to detect if images/etc were added
+                let output_size_before = output.len();
+
                 FlowProcess::process_content(
                     global,
                     element,
@@ -406,11 +414,15 @@ impl Process for FlowProcess {
                     output,
                 );
 
-                // Only push text box and add spacer if paragraph has actual content
-                let has_content = !element.texts.is_empty() && 
+                // Check if paragraph has meaningful text content
+                let has_text_content = !element.texts.is_empty() && 
                     element.texts.iter().any(|text| !text.text.trim().is_empty());
                 
-                if has_content {
+                // Check if other elements (like images) were added during content processing
+                let added_other_elements = output.len() > output_size_before;
+                
+                // Only push text box and spacer if paragraph has content or added elements
+                if has_text_content || added_other_elements {
                     output.push_text_box(global, element, state);
                     if global.opts.add_spacers_after_paragraphs {
                         output.push_spacer();
