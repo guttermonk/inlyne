@@ -278,8 +278,8 @@ impl Inlyne {
                 .push(combo_str);
         }
         
-        // Build markdown with inline HTML
-        let mut content = String::from("# ⌨️ Keyboard Shortcuts\n\n");
+        // Build HTML content
+        let mut content = String::from("<h1>⌨️ Keyboard Shortcuts</h1>\n\n");
         
         // Debug: log the action map
         tracing::debug!("Help action_map has {} entries", action_map.len());
@@ -288,7 +288,7 @@ impl Inlyne {
         }
         
         // Navigation section
-        content.push_str("## Navigation\n<table>\n");
+        content.push_str("<h2>Navigation</h2>\n<table>\n");
         content.push_str("<tr><th><strong>Action</strong></th><th><strong>Keys</strong></th></tr>\n");
         
         let nav_actions = [
@@ -313,7 +313,7 @@ impl Inlyne {
         content.push_str("</table>\n\n");
         
         // Zoom section
-        content.push_str("## Zoom\n<table>\n");
+        content.push_str("<h2>Zoom</h2>\n<table>\n");
         content.push_str("<tr><th><strong>Action</strong></th><th><strong>Keys</strong></th></tr>\n");
         
         let zoom_actions = ["Zoom In", "Zoom Out", "Reset Zoom"];
@@ -335,7 +335,7 @@ impl Inlyne {
         content.push_str("</table>\n\n");
         
         // File Operations section
-        content.push_str("## File Operations\n<table>\n");
+        content.push_str("<h2>File Operations</h2>\n<table>\n");
         content.push_str("<tr><th><strong>Action</strong></th><th><strong>Keys</strong></th></tr>\n");
         
         let file_actions = ["Next File", "Previous File", "Copy Selection"];
@@ -357,7 +357,7 @@ impl Inlyne {
         content.push_str("</table>\n\n");
         
         // Application section
-        content.push_str("## Application\n<table>\n");
+        content.push_str("<h2>Application</h2>\n<table>\n");
         content.push_str("<tr><th><strong>Action</strong></th><th><strong>Keys</strong></th></tr>\n");
         
         let app_actions = ["Toggle Help", "Quit"];
@@ -461,10 +461,17 @@ impl Inlyne {
         self.help_elements.clear();
         self.help_element_queue.lock().clear();
         
-        // Check if file content changed while help was visible
-        // If it did, we need to reload the document
-        // This is indicated by checking if current_file_content differs from what's displayed
-        // For now, just restore scroll position since elements are intact
+        // Restore document state
+        // Need to recalculate the document's reserved height since it was reset for help
+        let mut total_height = DEFAULT_PADDING * self.renderer.hidpi_scale;
+        for element in &self.elements {
+            if let Some(bounds) = &element.bounds {
+                total_height += bounds.size.1 + DEFAULT_PADDING * self.renderer.hidpi_scale * self.renderer.zoom;
+            }
+        }
+        self.renderer.positioner.reserved_height = total_height;
+        
+        // Restore scroll position
         self.renderer.set_scroll_y(self.saved_scroll_y);
         self.window.request_redraw();
     }
