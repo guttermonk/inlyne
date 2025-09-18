@@ -278,7 +278,7 @@ impl Inlyne {
                 .push(combo_str);
         }
         
-        // Build HTML content
+        // Build HTML content - use bold text with <br/> to avoid spacer insertion
         let mut content = String::from("<h1>⌨️ Keyboard Shortcuts</h1>\n\n");
         
         // Debug: log the action map
@@ -287,9 +287,10 @@ impl Inlyne {
             tracing::debug!("  {} -> {:?}", action, keys);
         }
         
-        // Navigation section
-        content.push_str("<h2>Navigation</h2>\n<table>\n");
-        content.push_str("<tr><th><strong>Action</strong></th><th><strong>Keys</strong></th></tr>\n");
+        // Navigation section - bold text with br tag
+        content.push_str("<strong>Navigation</strong><br/>\n");
+        content.push_str("<table>\n");
+        content.push_str("<tr><th>Action</th><th>Keys</th></tr>\n");
         
         let nav_actions = [
             "Scroll Up", "Scroll Down", "Page Up", "Page Down", 
@@ -312,9 +313,10 @@ impl Inlyne {
         }
         content.push_str("</table>\n\n");
         
-        // Zoom section
-        content.push_str("<h2>Zoom</h2>\n<table>\n");
-        content.push_str("<tr><th><strong>Action</strong></th><th><strong>Keys</strong></th></tr>\n");
+        // Zoom section - bold text with br tag
+        content.push_str("<strong>Zoom</strong><br/>\n");
+        content.push_str("<table>\n");
+        content.push_str("<tr><th>Action</th><th>Keys</th></tr>\n");
         
         let zoom_actions = ["Zoom In", "Zoom Out", "Reset Zoom"];
         for action in &zoom_actions {
@@ -334,9 +336,10 @@ impl Inlyne {
         }
         content.push_str("</table>\n\n");
         
-        // File Operations section
-        content.push_str("<h2>File Operations</h2>\n<table>\n");
-        content.push_str("<tr><th><strong>Action</strong></th><th><strong>Keys</strong></th></tr>\n");
+        // File Operations section - bold text with br tag
+        content.push_str("<strong>File Operations</strong><br/>\n");
+        content.push_str("<table>\n");
+        content.push_str("<tr><th>Action</th><th>Keys</th></tr>\n");
         
         let file_actions = ["Next File", "Previous File", "Copy Selection"];
         for action in &file_actions {
@@ -356,9 +359,10 @@ impl Inlyne {
         }
         content.push_str("</table>\n\n");
         
-        // Application section
-        content.push_str("<h2>Application</h2>\n<table>\n");
-        content.push_str("<tr><th><strong>Action</strong></th><th><strong>Keys</strong></th></tr>\n");
+        // Application section - bold text with br tag
+        content.push_str("<strong>Application</strong><br/>\n");
+        content.push_str("<table>\n");
+        content.push_str("<tr><th>Action</th><th>Keys</th></tr>\n");
         
         let app_actions = ["Toggle Help", "Quit"];
         for action in &app_actions {
@@ -379,10 +383,8 @@ impl Inlyne {
         content.push_str("</table>\n\n");
         
         // Footer
-        content.push_str("\n---\n");
-        content.push_str("<div align=\"center\">\n");
-        content.push_str("<em>Press any help key or <code>ESC</code> to close this help</em>\n");
-        content.push_str("</div>\n");
+        content.push_str("<hr>\n\n");
+        content.push_str("<div align=\"center\"><em>Press any help key or <code>ESC</code> to close this help</em></div>\n");
         
         tracing::debug!("Generated help content length: {} chars", content.len());
         content
