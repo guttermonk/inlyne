@@ -281,9 +281,14 @@ impl Inlyne {
         // Build markdown with inline HTML
         let mut content = String::from("# ⌨️ Keyboard Shortcuts\n\n");
         
+        // Debug: log the action map
+        tracing::debug!("Help action_map has {} entries", action_map.len());
+        for (action, keys) in &action_map {
+            tracing::debug!("  {} -> {:?}", action, keys);
+        }
+        
         // Navigation section
-        content.push_str("\n## Navigation");
-        content.push_str("<table>\n");
+        content.push_str("## Navigation\n<table>\n");
         content.push_str("<tr><th><strong>Action</strong></th><th><strong>Keys</strong></th></tr>\n");
         
         let nav_actions = [
@@ -291,80 +296,85 @@ impl Inlyne {
             "Go to Top", "Go to Bottom"
         ];
         for action in &nav_actions {
+            content.push_str("<tr><td>");
+            content.push_str(action);
+            content.push_str("</td><td>");
             if let Some(keys) = action_map.get(*action) {
-                content.push_str("<tr><td>");
-                content.push_str(action);
-                content.push_str("</td><td>");
                 for (i, key) in keys.iter().enumerate() {
                     if i > 0 { content.push_str(" <em>or</em> "); }
                     content.push_str(&format!("<code>{}</code>", 
                         html_escape::encode_text(&key)));
                 }
-                content.push_str("</td></tr>\n");
+            } else {
+                content.push_str("<em>Not configured</em>");
             }
+            content.push_str("</td></tr>\n");
         }
         content.push_str("</table>\n\n");
         
         // Zoom section
-        content.push_str("\n## Zoom");
-        content.push_str("<table>\n");
+        content.push_str("## Zoom\n<table>\n");
         content.push_str("<tr><th><strong>Action</strong></th><th><strong>Keys</strong></th></tr>\n");
         
         let zoom_actions = ["Zoom In", "Zoom Out", "Reset Zoom"];
         for action in &zoom_actions {
+            content.push_str("<tr><td>");
+            content.push_str(action);
+            content.push_str("</td><td>");
             if let Some(keys) = action_map.get(*action) {
-                content.push_str("<tr><td>");
-                content.push_str(action);
-                content.push_str("</td><td>");
                 for (i, key) in keys.iter().enumerate() {
                     if i > 0 { content.push_str(" <em>or</em> "); }
                     content.push_str(&format!("<code>{}</code>", 
                         html_escape::encode_text(&key)));
                 }
-                content.push_str("</td></tr>\n");
+            } else {
+                content.push_str("<em>Not configured</em>");
             }
+            content.push_str("</td></tr>\n");
         }
         content.push_str("</table>\n\n");
         
         // File Operations section
-        content.push_str("\n## File Operations");
-        content.push_str("<table>\n");
+        content.push_str("## File Operations\n<table>\n");
         content.push_str("<tr><th><strong>Action</strong></th><th><strong>Keys</strong></th></tr>\n");
         
         let file_actions = ["Next File", "Previous File", "Copy Selection"];
         for action in &file_actions {
+            content.push_str("<tr><td>");
+            content.push_str(action);
+            content.push_str("</td><td>");
             if let Some(keys) = action_map.get(*action) {
-                content.push_str("<tr><td>");
-                content.push_str(action);
-                content.push_str("</td><td>");
                 for (i, key) in keys.iter().enumerate() {
                     if i > 0 { content.push_str(" <em>or</em> "); }
                     content.push_str(&format!("<code>{}</code>", 
                         html_escape::encode_text(&key)));
                 }
-                content.push_str("</td></tr>\n");
+            } else {
+                content.push_str("<em>Not configured</em>");
             }
+            content.push_str("</td></tr>\n");
         }
         content.push_str("</table>\n\n");
         
         // Application section
-        content.push_str("\n## Application");
-        content.push_str("<table>\n");
+        content.push_str("## Application\n<table>\n");
         content.push_str("<tr><th><strong>Action</strong></th><th><strong>Keys</strong></th></tr>\n");
         
         let app_actions = ["Toggle Help", "Quit"];
         for action in &app_actions {
+            content.push_str("<tr><td>");
+            content.push_str(action);
+            content.push_str("</td><td>");
             if let Some(keys) = action_map.get(*action) {
-                content.push_str("<tr><td>");
-                content.push_str(action);
-                content.push_str("</td><td>");
                 for (i, key) in keys.iter().enumerate() {
                     if i > 0 { content.push_str(" <em>or</em> "); }
                     content.push_str(&format!("<code>{}</code>", 
                         html_escape::encode_text(&key)));
                 }
-                content.push_str("</td></tr>\n");
+            } else {
+                content.push_str("<em>Not configured</em>");
             }
+            content.push_str("</td></tr>\n");
         }
         content.push_str("</table>\n\n");
         
@@ -374,6 +384,7 @@ impl Inlyne {
         content.push_str("<em>Press any help key or <code>ESC</code> to close this help</em>\n");
         content.push_str("</div>\n");
         
+        tracing::debug!("Generated help content length: {} chars", content.len());
         content
     }
 
@@ -417,6 +428,10 @@ impl Inlyne {
         // Save current scroll position
         self.saved_scroll_y = self.renderer.scroll_y;
         
+        // Clear and reset for help view
+        self.help_element_queue.lock().clear();
+        self.help_elements.clear();
+        
         // Create help interpreter with separate element queue
         let help_interpreter = HtmlInterpreter::new(
             Arc::clone(&self.window),
@@ -435,8 +450,9 @@ impl Inlyne {
         std::thread::spawn(move || help_interpreter.interpret_md(help_receiver));
         help_sender.send(help_content).unwrap();
         
-        // Reset scroll for help view
-        self.renderer.set_scroll_y(0.0);
+        // Reset scroll and positioning for help view
+        self.renderer.scroll_y = 0.0;
+        self.renderer.positioner.reserved_height = DEFAULT_PADDING * self.renderer.hidpi_scale;
         self.window.request_redraw();
     }
     
