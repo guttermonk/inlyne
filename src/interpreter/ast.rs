@@ -976,8 +976,6 @@ impl Process for TableProcess {
         output.push_element(table);
         if global.opts.add_spacers_after_tables {
             output.push_spacer();
-            output.push_spacer();
-            output.push_spacer();
         }
     }
 }

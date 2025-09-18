@@ -212,12 +212,12 @@ impl Inlyne {
             image_cache.clone(),
             event_loop_proxy.clone(),
             opts.color_scheme,
-            false,  // NO spacers before headers
-            false,  // NO spacers after headers
-            false,  // NO spacers before tables
-            true,   // Add spacers after tables
-            false,  // NO spacers after paragraphs
-            false,  // NO spacers after lists
+            true,   // Add spacers before headers for separation from previous content
+            false,  // NO spacers after headers - keep tables close
+            false,  // NO spacers before tables - keep close to headers
+            true,   // Add spacers after tables for separation
+            true,   // Add spacers after paragraphs for better flow
+            true,   // Add spacers after lists for better flow
         );
 
         let (interpreter_sender, interpreter_receiver) = channel();
@@ -297,8 +297,7 @@ impl Inlyne {
         }
         
         // Navigation section
-        content.push_str("## Navigation\n");
-        content.push_str("| Action | Keys |\n");
+        content.push_str("## Navigation\n| Action | Keys |\n");
         content.push_str("|--------|------|\n");
         
         let nav_actions = [
@@ -322,8 +321,7 @@ impl Inlyne {
         content.push_str("\n");
         
         // Zoom section
-        content.push_str("## Zoom\n");
-        content.push_str("| Action | Keys |\n");
+        content.push_str("## Zoom\n| Action | Keys |\n");
         content.push_str("|--------|------|\n");
         
         let zoom_actions = ["Zoom In", "Zoom Out", "Reset Zoom"];
@@ -344,8 +342,7 @@ impl Inlyne {
         content.push_str("\n");
         
         // File Operations section
-        content.push_str("## File Operations\n");
-        content.push_str("| Action | Keys |\n");
+        content.push_str("## File Operations\n| Action | Keys |\n");
         content.push_str("|--------|------|\n");
         
         let file_actions = ["Next File", "Previous File", "Copy Selection"];
@@ -366,8 +363,7 @@ impl Inlyne {
         content.push_str("\n");
         
         // Application section
-        content.push_str("## Application\n");
-        content.push_str("| Action | Keys |\n");
+        content.push_str("## Application\n| Action | Keys |\n");
         content.push_str("|--------|------|\n");
         
         let app_actions = ["Toggle Help", "Quit"];
@@ -450,12 +446,12 @@ impl Inlyne {
             Arc::clone(&self.image_cache),
             self.event_loop_proxy.clone(),
             self.opts.color_scheme,
-            false,  // NO spacers before headers in help
+            true,   // Add spacers before headers in help
             false,  // NO spacers after headers in help
             false,  // NO spacers before tables in help
             true,   // Add spacers after tables in help
-            false,  // NO spacers after paragraphs in help
-            false,  // NO spacers after lists in help
+            true,   // Add spacers after paragraphs in help
+            true,   // Add spacers after lists in help
         );
         
         // Use same element padding as regular documents (from opts)
