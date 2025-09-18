@@ -179,7 +179,7 @@ impl Opts {
             metrics,
             position,
             size,
-            element_padding: 1.0,
+            element_padding: 0.0,
         })
     }
 

@@ -212,12 +212,12 @@ impl Inlyne {
             image_cache.clone(),
             event_loop_proxy.clone(),
             opts.color_scheme,
-            true,   // Add spacers before headers - separate from previous content
-            false,  // Don't add spacers after headers - keep tables close
-            false,  // Don't add spacers before tables - keep close to headers
-            true,   // Add spacers after tables - separate from following content
-            true,   // Add spacers after paragraphs for separation
-            true,   // Add spacers after lists for separation
+            false,  // NO spacers before headers
+            false,  // NO spacers after headers
+            false,  // NO spacers before tables
+            true,   // Add spacers after tables
+            false,  // NO spacers after paragraphs
+            false,  // NO spacers after lists
         );
 
         let (interpreter_sender, interpreter_receiver) = channel();
@@ -450,12 +450,12 @@ impl Inlyne {
             Arc::clone(&self.image_cache),
             self.event_loop_proxy.clone(),
             self.opts.color_scheme,
-            true,   // Add spacers before headers in help
-            false,  // Don't add spacers after headers in help
-            false,  // Don't add spacers before tables in help
+            false,  // NO spacers before headers in help
+            false,  // NO spacers after headers in help
+            false,  // NO spacers before tables in help
             true,   // Add spacers after tables in help
-            true,   // Add spacers after paragraphs in help
-            true,   // Add spacers after lists in help
+            false,  // NO spacers after paragraphs in help
+            false,  // NO spacers after lists in help
         );
         
         // Use same element padding as regular documents (from opts)
