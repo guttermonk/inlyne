@@ -40,9 +40,10 @@ impl Opts {
             lines_to_scroll: LinesToScroll::default().0,
             keybindings: Default::default(),
             color_scheme: None,
-            metrics: Default::default(),
-            size: None,
+            metrics: None,
             position: None,
+            size: None,
+            element_padding: 2.0,
         }
     }
 }

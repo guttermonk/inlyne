@@ -73,6 +73,7 @@ pub struct Opts {
     pub metrics: Option<MetricsExporter>,
     pub position: Option<Position>,
     pub size: Option<Size>,
+    pub element_padding: f32,
 }
 
 impl Opts {
@@ -178,6 +179,7 @@ impl Opts {
             metrics,
             position,
             size,
+            element_padding: 2.0,
         })
     }
 

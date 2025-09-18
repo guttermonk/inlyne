@@ -200,8 +200,8 @@ impl Inlyne {
             .with_context(|| format!("Could not read file at '{}'", file_path.display()))?;
 
         let event_loop_proxy = event_loop.create_proxy();
-        // Set element padding for main document
-        renderer.element_padding = DEFAULT_PADDING;
+        // Set element padding from options
+        renderer.element_padding = opts.element_padding;
         
         let interpreter = HtmlInterpreter::new(
             window.clone(),
@@ -212,6 +212,7 @@ impl Inlyne {
             image_cache.clone(),
             event_loop_proxy.clone(),
             opts.color_scheme,
+            true,   // Add spacers before headers by default
             false,  // Don't add spacers after headers by default
             false,  // Don't add spacers around tables by default
             false,  // Don't add spacers after paragraphs by default
@@ -310,8 +311,7 @@ impl Inlyne {
             if let Some(keys) = action_map.get(*action) {
                 for (i, key) in keys.iter().enumerate() {
                     if i > 0 { content.push_str(" or "); }
-                    content.push_str(&format!("`{}`", 
-                        html_escape::encode_text(&key)));
+                    content.push_str(&format!("`{}`", key));
                 }
             } else {
                 content.push_str("*Not configured*");
@@ -333,8 +333,7 @@ impl Inlyne {
             if let Some(keys) = action_map.get(*action) {
                 for (i, key) in keys.iter().enumerate() {
                     if i > 0 { content.push_str(" or "); }
-                    content.push_str(&format!("`{}`", 
-                        html_escape::encode_text(&key)));
+                    content.push_str(&format!("`{}`", key));
                 }
             } else {
                 content.push_str("*Not configured*");
@@ -356,8 +355,7 @@ impl Inlyne {
             if let Some(keys) = action_map.get(*action) {
                 for (i, key) in keys.iter().enumerate() {
                     if i > 0 { content.push_str(" or "); }
-                    content.push_str(&format!("`{}`", 
-                        html_escape::encode_text(&key)));
+                    content.push_str(&format!("`{}`", key));
                 }
             } else {
                 content.push_str("*Not configured*");
@@ -379,8 +377,7 @@ impl Inlyne {
             if let Some(keys) = action_map.get(*action) {
                 for (i, key) in keys.iter().enumerate() {
                     if i > 0 { content.push_str(" or "); }
-                    content.push_str(&format!("`{}`", 
-                        html_escape::encode_text(&key)));
+                    content.push_str(&format!("`{}`", key));
                 }
             } else {
                 content.push_str("*Not configured*");
@@ -429,7 +426,7 @@ impl Inlyne {
         self.current_file_content = contents.clone();
         self.element_queue.lock().clear();
         self.elements.clear();
-        self.renderer.positioner.reserved_height = self.renderer.element_padding * self.renderer.hidpi_scale;
+        self.renderer.positioner.reserved_height = self.opts.element_padding * self.renderer.hidpi_scale;
         self.renderer.positioner.anchors.clear();
         self.interpreter_sender.send(contents).unwrap();
     }
@@ -452,14 +449,15 @@ impl Inlyne {
             Arc::clone(&self.image_cache),
             self.event_loop_proxy.clone(),
             self.opts.color_scheme,
+            true,   // Add spacers before headers in help
             false,  // Don't add spacers after headers in help
             false,  // Don't add spacers around tables in help
             false,  // Don't add spacers after paragraphs in help
             false,  // Don't add spacers after lists in help
         );
         
-        // Also set renderer padding to 0 for help display
-        self.renderer.element_padding = 0.0;
+        // Use same element padding as regular documents (from opts)
+        self.renderer.element_padding = self.opts.element_padding;
         
         // Load help content in separate thread
         let help_content = self.get_help_html();
@@ -469,8 +467,7 @@ impl Inlyne {
         
         // Reset scroll and positioning for help view
         self.renderer.scroll_y = 0.0;
-        self.renderer.element_padding = 0.0;  // No padding in help view
-        self.renderer.positioner.reserved_height = 0.0;
+        self.renderer.positioner.reserved_height = self.opts.element_padding * self.renderer.hidpi_scale;
         self.window.request_redraw();
     }
     
@@ -480,8 +477,8 @@ impl Inlyne {
         self.help_element_queue.lock().clear();
         
         // Restore document state
-        // Restore padding for normal document
-        self.renderer.element_padding = DEFAULT_PADDING;
+        // Restore padding for normal document (same as help - from opts)
+        self.renderer.element_padding = self.opts.element_padding;
         // Need to recalculate the document's reserved height since it was reset for help
         let mut total_height = self.renderer.element_padding * self.renderer.hidpi_scale;
         for element in &self.elements {

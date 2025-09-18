@@ -148,6 +148,7 @@ pub struct AstOpts {
     pub hidpi_scale: f32,
     pub surface_format: TextureFormat,
     pub page_margin: f32,
+    pub add_spacers_before_headers: bool,
     pub add_spacers_after_headers: bool,
     pub add_spacers_around_tables: bool,
     pub add_spacers_after_paragraphs: bool,
@@ -486,7 +487,7 @@ impl Process for FlowProcess {
             }
             TagName::Header(header) => {
                 output.push_text_box(global, element, state.borrow());
-                if global.opts.add_spacers_after_headers {
+                if global.opts.add_spacers_before_headers {
                     output.push_spacer();
                 }
 
