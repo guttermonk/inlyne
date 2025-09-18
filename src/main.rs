@@ -278,7 +278,7 @@ impl Inlyne {
                 .push(combo_str);
         }
         
-        // Build HTML content - use bold text with <br/> to avoid spacer insertion
+        // Build HTML content - use table rows with section names to avoid spacer insertion
         let mut content = String::from("<h1>⌨️ Keyboard Shortcuts</h1>\n\n");
         
         // Debug: log the action map
@@ -287,9 +287,9 @@ impl Inlyne {
             tracing::debug!("  {} -> {:?}", action, keys);
         }
         
-        // Navigation section - bold text with br tag
-        content.push_str("<strong>Navigation</strong><br/>\n");
+        // Navigation section - section name as table row with bold text
         content.push_str("<table>\n");
+        content.push_str("<tr><td colspan=\"2\"><strong>Navigation</strong></td></tr>\n");
         content.push_str("<tr><th>Action</th><th>Keys</th></tr>\n");
         
         let nav_actions = [
@@ -313,9 +313,9 @@ impl Inlyne {
         }
         content.push_str("</table>\n\n");
         
-        // Zoom section - bold text with br tag
-        content.push_str("<strong>Zoom</strong><br/>\n");
+        // Zoom section - section name as table row with bold text
         content.push_str("<table>\n");
+        content.push_str("<tr><td colspan=\"2\"><strong>Zoom</strong></td></tr>\n");
         content.push_str("<tr><th>Action</th><th>Keys</th></tr>\n");
         
         let zoom_actions = ["Zoom In", "Zoom Out", "Reset Zoom"];
@@ -336,9 +336,9 @@ impl Inlyne {
         }
         content.push_str("</table>\n\n");
         
-        // File Operations section - bold text with br tag
-        content.push_str("<strong>File Operations</strong><br/>\n");
+        // File Operations section - section name as table row with bold text
         content.push_str("<table>\n");
+        content.push_str("<tr><td colspan=\"2\"><strong>File Operations</strong></td></tr>\n");
         content.push_str("<tr><th>Action</th><th>Keys</th></tr>\n");
         
         let file_actions = ["Next File", "Previous File", "Copy Selection"];
@@ -359,9 +359,9 @@ impl Inlyne {
         }
         content.push_str("</table>\n\n");
         
-        // Application section - bold text with br tag
-        content.push_str("<strong>Application</strong><br/>\n");
+        // Application section - section name as table row with bold text
         content.push_str("<table>\n");
+        content.push_str("<tr><td colspan=\"2\"><strong>Application</strong></td></tr>\n");
         content.push_str("<tr><th>Action</th><th>Keys</th></tr>\n");
         
         let app_actions = ["Toggle Help", "Quit"];
