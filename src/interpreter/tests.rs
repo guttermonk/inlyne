@@ -128,6 +128,10 @@ impl InterpreterOpts {
             image_cache,
             window,
             color_scheme,
+            true,  // Add spacers after headers for tests
+            true,  // Add spacers around tables for tests
+            true,  // Add spacers after paragraphs for tests
+            true,  // Add spacers after lists for tests
         );
 
         (interpreter, element_queue)

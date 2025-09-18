@@ -51,10 +51,14 @@ pub struct Positioner {
 
 impl Positioner {
     pub fn new(screen_size: Size, hidpi_scale: f32, page_width: f32, page_margin: f32) -> Self {
+        Self::new_with_padding(screen_size, hidpi_scale, page_width, page_margin, DEFAULT_PADDING)
+    }
+    
+    pub fn new_with_padding(screen_size: Size, hidpi_scale: f32, page_width: f32, page_margin: f32, element_padding: f32) -> Self {
         let mut taffy = Taffy::new();
         taffy.disable_rounding();
         Self {
-            reserved_height: DEFAULT_PADDING * hidpi_scale,
+            reserved_height: element_padding * hidpi_scale,
             hidpi_scale,
             page_width,
             page_margin,
@@ -70,6 +74,7 @@ impl Positioner {
         text_system: &mut TextSystem,
         element: &mut Positioned<Element>,
         zoom: f32,
+        element_padding: f32,
     ) -> anyhow::Result<()> {
         let centering = (self.screen_size.0 - self.page_width).max(0.) / 2.;
 
@@ -134,24 +139,24 @@ impl Positioner {
                 let mut max_height: f32 = 0.;
                 let mut max_width: f32 = 0.;
                 for element in &mut row.elements {
-                    self.position(text_system, element, zoom)?;
+                    self.position(text_system, element, zoom, element_padding)?;
                     let element_bounds = element
                         .bounds
                         .as_mut()
                         .context("Element didn't have bounds")?;
 
                     let target_width = reserved_width
-                        + DEFAULT_PADDING * self.hidpi_scale * zoom
+                        + element_padding * self.hidpi_scale * zoom
                         + element_bounds.size.0;
                     // Row would be too long with this element so add another line
                     if target_width > self.screen_size.0 - self.page_margin - centering {
                         max_width = max_width.max(reserved_width);
                         reserved_width = self.page_margin
                             + centering
-                            + DEFAULT_PADDING * self.hidpi_scale * zoom
+                            + element_padding * self.hidpi_scale * zoom
                             + element_bounds.size.0;
                         inner_reserved_height +=
-                            max_height + DEFAULT_PADDING * self.hidpi_scale * zoom;
+                            max_height + element_padding * self.hidpi_scale * zoom;
                         max_height = element_bounds.size.1;
                         element_bounds.pos.0 = self.page_margin + centering;
                     } else {
@@ -162,7 +167,7 @@ impl Positioner {
                     element_bounds.pos.1 = self.reserved_height + inner_reserved_height;
                 }
                 max_width = max_width.max(reserved_width);
-                inner_reserved_height += max_height + DEFAULT_PADDING * self.hidpi_scale * zoom;
+                inner_reserved_height += max_height + element_padding * self.hidpi_scale * zoom;
                 Rect::new(
                     (self.page_margin + centering, self.reserved_height),
                     (
@@ -175,30 +180,30 @@ impl Positioner {
                 let mut section_bounds =
                     Rect::new((self.page_margin + centering, self.reserved_height), (0., 0.));
                 if let Some(ref mut summary) = *section.summary {
-                    self.position(text_system, summary, zoom)?;
+                    self.position(text_system, summary, zoom, element_padding)?;
                     let element_size = summary
                         .bounds
                         .as_mut()
                         .context("Element didn't have bounds")?
                         .size;
                     self.reserved_height +=
-                        element_size.1 + DEFAULT_PADDING * self.hidpi_scale * zoom;
+                        element_size.1 + element_padding * self.hidpi_scale * zoom;
                     section_bounds.size.1 +=
-                        element_size.1 + DEFAULT_PADDING * self.hidpi_scale * zoom;
+                        element_size.1 + element_padding * self.hidpi_scale * zoom;
                     section_bounds.size.0 = section_bounds.size.0.max(element_size.0)
                 }
                 for element in &mut section.elements {
-                    self.position(text_system, element, zoom)?;
+                    self.position(text_system, element, zoom, element_padding)?;
                     let element_size = element
                         .bounds
                         .as_mut()
                         .context("Element didn't have bounds")?
                         .size;
                     self.reserved_height +=
-                        element_size.1 + DEFAULT_PADDING * self.hidpi_scale * zoom;
+                        element_size.1 + element_padding * self.hidpi_scale * zoom;
                     if !*section.hidden.borrow() {
                         section_bounds.size.1 +=
-                            element_size.1 + DEFAULT_PADDING * self.hidpi_scale * zoom;
+                            element_size.1 + element_padding * self.hidpi_scale * zoom;
                         section_bounds.size.0 = section_bounds.size.0.max(element_size.0)
                     }
                 }
@@ -216,12 +221,13 @@ impl Positioner {
         text_system: &mut TextSystem,
         elements: &mut [Positioned<Element>],
         zoom: f32,
+        element_padding: f32,
     ) -> anyhow::Result<()> {
-        self.reserved_height = DEFAULT_PADDING * self.hidpi_scale * zoom;
+        self.reserved_height = element_padding * self.hidpi_scale * zoom;
 
         for element in elements {
-            self.position(text_system, element, zoom)?;
-            self.reserved_height += DEFAULT_PADDING * self.hidpi_scale * zoom
+            self.position(text_system, element, zoom, element_padding)?;
+            self.reserved_height += element_padding * self.hidpi_scale * zoom
                 + element
                     .bounds
                     .as_ref()
@@ -229,6 +235,7 @@ impl Positioner {
                     .size
                     .1;
         }
+
         Ok(())
     }
 }

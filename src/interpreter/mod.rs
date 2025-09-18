@@ -104,6 +104,10 @@ impl HtmlInterpreter {
         image_cache: ImageCache,
         event_proxy: EventLoopProxy<InlyneEvent>,
         color_scheme: Option<ResolvedTheme>,
+        add_spacers_after_headers: bool,
+        add_spacers_around_tables: bool,
+        add_spacers_after_paragraphs: bool,
+        add_spacers_after_lists: bool,
     ) -> Self {
         let live_window = LiveWindow {
             window,
@@ -117,6 +121,10 @@ impl HtmlInterpreter {
             image_cache,
             Arc::new(Mutex::new(live_window)),
             color_scheme,
+            add_spacers_after_headers,
+            add_spacers_around_tables,
+            add_spacers_after_paragraphs,
+            add_spacers_after_lists,
         )
     }
 
@@ -130,6 +138,10 @@ impl HtmlInterpreter {
         image_cache: ImageCache,
         window: Arc<Mutex<dyn WindowInteractor + Send>>,
         color_scheme: Option<ResolvedTheme>,
+        add_spacers_after_headers: bool,
+        add_spacers_around_tables: bool,
+        add_spacers_after_paragraphs: bool,
+        add_spacers_after_lists: bool,
     ) -> Self {
         let ast = Ast::new(
             AstOpts {
@@ -138,6 +150,10 @@ impl HtmlInterpreter {
                 surface_format,
                 hidpi_scale,
                 page_margin: theme.page_margin as f32,
+                add_spacers_after_headers,
+                add_spacers_around_tables,
+                add_spacers_after_paragraphs,
+                add_spacers_after_lists,
                 image_cache,
                 window: Arc::clone(&window),
                 color_scheme,

@@ -200,6 +200,9 @@ impl Inlyne {
             .with_context(|| format!("Could not read file at '{}'", file_path.display()))?;
 
         let event_loop_proxy = event_loop.create_proxy();
+        // Set element padding for main document
+        renderer.element_padding = DEFAULT_PADDING;
+        
         let interpreter = HtmlInterpreter::new(
             window.clone(),
             element_queue.clone(),
@@ -209,6 +212,10 @@ impl Inlyne {
             image_cache.clone(),
             event_loop_proxy.clone(),
             opts.color_scheme,
+            false,  // Don't add spacers after headers by default
+            false,  // Don't add spacers around tables by default
+            false,  // Don't add spacers after paragraphs by default
+            false,  // Don't add spacers after lists by default
         );
 
         let (interpreter_sender, interpreter_receiver) = channel();
@@ -287,104 +294,104 @@ impl Inlyne {
             tracing::debug!("  {} -> {:?}", action, keys);
         }
         
-        // Navigation section - section name as table row with bold text
-        content.push_str("<table>\n");
-        content.push_str("<tr><td colspan=\"2\"><strong>Navigation</strong></td></tr>\n");
-        content.push_str("<tr><th>Action</th><th>Keys</th></tr>\n");
+        // Navigation section
+        content.push_str("## Navigation\n");
+        content.push_str("| Action | Keys |\n");
+        content.push_str("|--------|------|\n");
         
         let nav_actions = [
             "Scroll Up", "Scroll Down", "Page Up", "Page Down", 
             "Go to Top", "Go to Bottom"
         ];
         for action in &nav_actions {
-            content.push_str("<tr><td>");
+            content.push_str("| ");
             content.push_str(action);
-            content.push_str("</td><td>");
+            content.push_str(" | ");
             if let Some(keys) = action_map.get(*action) {
                 for (i, key) in keys.iter().enumerate() {
-                    if i > 0 { content.push_str(" <em>or</em> "); }
-                    content.push_str(&format!("<code>{}</code>", 
+                    if i > 0 { content.push_str(" or "); }
+                    content.push_str(&format!("`{}`", 
                         html_escape::encode_text(&key)));
                 }
             } else {
-                content.push_str("<em>Not configured</em>");
+                content.push_str("*Not configured*");
             }
-            content.push_str("</td></tr>\n");
+            content.push_str(" |\n");
         }
-        content.push_str("</table>\n\n");
+        content.push_str("\n");
         
-        // Zoom section - section name as table row with bold text
-        content.push_str("<table>\n");
-        content.push_str("<tr><td colspan=\"2\"><strong>Zoom</strong></td></tr>\n");
-        content.push_str("<tr><th>Action</th><th>Keys</th></tr>\n");
+        // Zoom section
+        content.push_str("## Zoom\n");
+        content.push_str("| Action | Keys |\n");
+        content.push_str("|--------|------|\n");
         
         let zoom_actions = ["Zoom In", "Zoom Out", "Reset Zoom"];
         for action in &zoom_actions {
-            content.push_str("<tr><td>");
+            content.push_str("| ");
             content.push_str(action);
-            content.push_str("</td><td>");
+            content.push_str(" | ");
             if let Some(keys) = action_map.get(*action) {
                 for (i, key) in keys.iter().enumerate() {
-                    if i > 0 { content.push_str(" <em>or</em> "); }
-                    content.push_str(&format!("<code>{}</code>", 
+                    if i > 0 { content.push_str(" or "); }
+                    content.push_str(&format!("`{}`", 
                         html_escape::encode_text(&key)));
                 }
             } else {
-                content.push_str("<em>Not configured</em>");
+                content.push_str("*Not configured*");
             }
-            content.push_str("</td></tr>\n");
+            content.push_str(" |\n");
         }
-        content.push_str("</table>\n\n");
+        content.push_str("\n");
         
-        // File Operations section - section name as table row with bold text
-        content.push_str("<table>\n");
-        content.push_str("<tr><td colspan=\"2\"><strong>File Operations</strong></td></tr>\n");
-        content.push_str("<tr><th>Action</th><th>Keys</th></tr>\n");
+        // File Operations section
+        content.push_str("## File Operations\n");
+        content.push_str("| Action | Keys |\n");
+        content.push_str("|--------|------|\n");
         
         let file_actions = ["Next File", "Previous File", "Copy Selection"];
         for action in &file_actions {
-            content.push_str("<tr><td>");
+            content.push_str("| ");
             content.push_str(action);
-            content.push_str("</td><td>");
+            content.push_str(" | ");
             if let Some(keys) = action_map.get(*action) {
                 for (i, key) in keys.iter().enumerate() {
-                    if i > 0 { content.push_str(" <em>or</em> "); }
-                    content.push_str(&format!("<code>{}</code>", 
+                    if i > 0 { content.push_str(" or "); }
+                    content.push_str(&format!("`{}`", 
                         html_escape::encode_text(&key)));
                 }
             } else {
-                content.push_str("<em>Not configured</em>");
+                content.push_str("*Not configured*");
             }
-            content.push_str("</td></tr>\n");
+            content.push_str(" |\n");
         }
-        content.push_str("</table>\n\n");
+        content.push_str("\n");
         
-        // Application section - section name as table row with bold text
-        content.push_str("<table>\n");
-        content.push_str("<tr><td colspan=\"2\"><strong>Application</strong></td></tr>\n");
-        content.push_str("<tr><th>Action</th><th>Keys</th></tr>\n");
+        // Application section
+        content.push_str("## Application\n");
+        content.push_str("| Action | Keys |\n");
+        content.push_str("|--------|------|\n");
         
         let app_actions = ["Toggle Help", "Quit"];
         for action in &app_actions {
-            content.push_str("<tr><td>");
+            content.push_str("| ");
             content.push_str(action);
-            content.push_str("</td><td>");
+            content.push_str(" | ");
             if let Some(keys) = action_map.get(*action) {
                 for (i, key) in keys.iter().enumerate() {
-                    if i > 0 { content.push_str(" <em>or</em> "); }
-                    content.push_str(&format!("<code>{}</code>", 
+                    if i > 0 { content.push_str(" or "); }
+                    content.push_str(&format!("`{}`", 
                         html_escape::encode_text(&key)));
                 }
             } else {
-                content.push_str("<em>Not configured</em>");
+                content.push_str("*Not configured*");
             }
-            content.push_str("</td></tr>\n");
+            content.push_str(" |\n");
         }
-        content.push_str("</table>\n\n");
+        content.push_str("\n");
         
         // Footer
-        content.push_str("<hr>\n\n");
-        content.push_str("<div align=\"center\"><em>Press any help key or <code>ESC</code> to close this help</em></div>\n");
+        content.push_str("---\n\n");
+        content.push_str("*Press any help key or `ESC` to close this help*\n");
         
         tracing::debug!("Generated help content length: {} chars", content.len());
         content
@@ -406,10 +413,11 @@ impl Inlyne {
                     &mut renderer.text_system,
                     &mut positioned_element,
                     renderer.zoom,
+                    renderer.element_padding,
                 )
                 .unwrap();
             renderer.positioner.reserved_height +=
-                DEFAULT_PADDING * renderer.hidpi_scale * renderer.zoom
+                renderer.element_padding * renderer.hidpi_scale * renderer.zoom
                     + positioned_element.bounds.as_ref().unwrap().size.1;
             elements.push(positioned_element);
         }
@@ -421,7 +429,7 @@ impl Inlyne {
         self.current_file_content = contents.clone();
         self.element_queue.lock().clear();
         self.elements.clear();
-        self.renderer.positioner.reserved_height = DEFAULT_PADDING * self.renderer.hidpi_scale;
+        self.renderer.positioner.reserved_height = self.renderer.element_padding * self.renderer.hidpi_scale;
         self.renderer.positioner.anchors.clear();
         self.interpreter_sender.send(contents).unwrap();
     }
@@ -444,7 +452,14 @@ impl Inlyne {
             Arc::clone(&self.image_cache),
             self.event_loop_proxy.clone(),
             self.opts.color_scheme,
+            false,  // Don't add spacers after headers in help
+            false,  // Don't add spacers around tables in help
+            false,  // Don't add spacers after paragraphs in help
+            false,  // Don't add spacers after lists in help
         );
+        
+        // Also set renderer padding to 0 for help display
+        self.renderer.element_padding = 0.0;
         
         // Load help content in separate thread
         let help_content = self.get_help_html();
@@ -454,7 +469,8 @@ impl Inlyne {
         
         // Reset scroll and positioning for help view
         self.renderer.scroll_y = 0.0;
-        self.renderer.positioner.reserved_height = DEFAULT_PADDING * self.renderer.hidpi_scale;
+        self.renderer.element_padding = 0.0;  // No padding in help view
+        self.renderer.positioner.reserved_height = 0.0;
         self.window.request_redraw();
     }
     
@@ -464,11 +480,13 @@ impl Inlyne {
         self.help_element_queue.lock().clear();
         
         // Restore document state
+        // Restore padding for normal document
+        self.renderer.element_padding = DEFAULT_PADDING;
         // Need to recalculate the document's reserved height since it was reset for help
-        let mut total_height = DEFAULT_PADDING * self.renderer.hidpi_scale;
+        let mut total_height = self.renderer.element_padding * self.renderer.hidpi_scale;
         for element in &self.elements {
             if let Some(bounds) = &element.bounds {
-                total_height += bounds.size.1 + DEFAULT_PADDING * self.renderer.hidpi_scale * self.renderer.zoom;
+                total_height += bounds.size.1 + self.renderer.element_padding * self.renderer.hidpi_scale * self.renderer.zoom;
             }
         }
         self.renderer.positioner.reserved_height = total_height;

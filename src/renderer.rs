@@ -7,7 +7,7 @@ use crate::fonts::get_fonts;
 use crate::image::ImageRenderer;
 use crate::metrics::{histogram, HistTag};
 use crate::opts::FontOptions;
-use crate::positioner::{Positioned, Positioner};
+use crate::positioner::{Positioned, Positioner, DEFAULT_PADDING};
 use crate::selection::Selection;
 use crate::table::TABLE_ROW_GAP;
 use crate::text::{CachedTextArea, TextCache, TextSystem};
@@ -49,6 +49,7 @@ pub struct Renderer {
     pub theme: Theme,
     pub zoom: f32,
     pub positioner: Positioner,
+    pub element_padding: f32,
 }
 
 impl Renderer {
@@ -187,6 +188,7 @@ impl Renderer {
             image_renderer,
             theme,
             positioner,
+            element_padding: DEFAULT_PADDING,
         })
     }
 
@@ -803,7 +805,7 @@ impl Renderer {
         let start = Instant::now();
         let res = self
             .positioner
-            .reposition(&mut self.text_system, elements, self.zoom);
+            .reposition(&mut self.text_system, elements, self.zoom, self.element_padding);
         histogram!(HistTag::Reposition).record(start.elapsed());
         res
     }

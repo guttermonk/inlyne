@@ -148,6 +148,10 @@ pub struct AstOpts {
     pub hidpi_scale: f32,
     pub surface_format: TextureFormat,
     pub page_margin: f32,
+    pub add_spacers_after_headers: bool,
+    pub add_spacers_around_tables: bool,
+    pub add_spacers_after_paragraphs: bool,
+    pub add_spacers_after_lists: bool,
 
     // needed for images
     pub color_scheme: Option<ResolvedTheme>,
@@ -401,7 +405,9 @@ impl Process for FlowProcess {
                 );
 
                 output.push_text_box(global, element, state);
-                output.push_spacer();
+                if global.opts.add_spacers_after_paragraphs {
+                    output.push_spacer();
+                }
             }
             TagName::Anchor => {
                 for attr in attributes {
@@ -480,7 +486,9 @@ impl Process for FlowProcess {
             }
             TagName::Header(header) => {
                 output.push_text_box(global, element, state.borrow());
-                output.push_spacer();
+                if global.opts.add_spacers_after_headers {
+                    output.push_spacer();
+                }
 
                 state.set_align_from_attributes(attributes);
                 element.set_align_or_default(state.text_options.align);
@@ -504,7 +512,9 @@ impl Process for FlowProcess {
                 let anchor = global.opts.anchorizer.lock().anchorize(anchor);
                 element.set_anchor(format!("#{anchor}"));
                 output.push_text_box(global, element, state);
-                output.push_spacer();
+                if global.opts.add_spacers_after_headers {
+                    output.push_spacer();
+                }
             }
             TagName::HorizontalRuler => output.push_element(Spacer::visible()),
             TagName::Picture => PictureProcess::process(global, (), state, node, output),
@@ -723,7 +733,7 @@ impl Process for OrderedListProcess {
             },
             |_| {},
         );
-        if state.global_indent == global.opts.page_margin / 2. {
+        if state.global_indent == global.opts.page_margin / 2. && global.opts.add_spacers_after_lists {
             output.push_spacer();
         }
     }
@@ -752,7 +762,7 @@ impl Process for UnorderedListProcess {
             },
             |_| {},
         );
-        if state.global_indent == global.opts.page_margin / 2. {
+        if state.global_indent == global.opts.page_margin / 2. && global.opts.add_spacers_after_lists {
             output.push_spacer();
         }
     }
@@ -940,9 +950,13 @@ impl Process for TableProcess {
             },
             |_| {},
         );
-        output.push_spacer();
+        if global.opts.add_spacers_around_tables {
+            output.push_spacer();
+        }
         output.push_element(table);
-        output.push_spacer();
+        if global.opts.add_spacers_around_tables {
+            output.push_spacer();
+        }
     }
 }
 
