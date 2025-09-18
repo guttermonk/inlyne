@@ -87,12 +87,14 @@ impl Push<Element> for Vec<Element> {
         element.indent = state.global_indent;
 
         if !tb.texts.is_empty() {
-            let content = tb.texts.iter().any(|text| !text.text.trim().is_empty());
+            let content = tb.texts.iter().any(|text| !text.text.is_empty());
 
             if content {
                 tb.indent = state.global_indent;
                 self.push_element(tb);
             }
+        } else {
+            element.is_checkbox = tb.is_checkbox;
         }
     }
     fn push_image_from_picture(&mut self, global: &Static, state: State, picture: Picture) {
@@ -404,20 +406,9 @@ impl Process for FlowProcess {
                     output,
                 );
 
-                // Only push text box and potentially add spacer if there's actual content
-                let has_content = !element.texts.is_empty() && 
-                    element.texts.iter().any(|text| !text.text.trim().is_empty());
-                
-                if has_content {
-                    output.push_text_box(global, element, state);
-                    if global.opts.add_spacers_after_paragraphs {
-                        tracing::debug!("Adding spacer AFTER paragraph");
-                        output.push_spacer();
-                    } else {
-                        tracing::debug!("NOT adding spacer after paragraph (text: {:?})", element.texts.iter().map(|t| &t.text).collect::<Vec<_>>());
-                    }
-                } else {
-                    tracing::debug!("Skipping empty paragraph");
+                output.push_text_box(global, element, state);
+                if global.opts.add_spacers_after_paragraphs {
+                    output.push_spacer();
                 }
             }
             TagName::Anchor => {
@@ -498,7 +489,6 @@ impl Process for FlowProcess {
             TagName::Header(header) => {
                 output.push_text_box(global, element, state.borrow());
                 if global.opts.add_spacers_before_headers {
-                    tracing::debug!("Adding spacer BEFORE header");
                     output.push_spacer();
                 }
 
@@ -525,10 +515,7 @@ impl Process for FlowProcess {
                 element.set_anchor(format!("#{anchor}"));
                 output.push_text_box(global, element, state);
                 if global.opts.add_spacers_after_headers {
-                    tracing::debug!("Adding spacer AFTER header");
                     output.push_spacer();
-                } else {
-                    tracing::debug!("NOT adding spacer after header");
                 }
             }
             TagName::HorizontalRuler => output.push_element(Spacer::visible()),
@@ -966,17 +953,11 @@ impl Process for TableProcess {
             |_| {},
         );
         if global.opts.add_spacers_before_tables {
-            tracing::debug!("Adding spacer BEFORE table");
             output.push_spacer();
-        } else {
-            tracing::debug!("NOT adding spacer before table");
         }
         output.push_element(table);
         if global.opts.add_spacers_after_tables {
-            tracing::debug!("Adding spacer AFTER table");
             output.push_spacer();
-        } else {
-            tracing::debug!("NOT adding spacer after table");
         }
     }
 }
