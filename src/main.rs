@@ -212,12 +212,12 @@ impl Inlyne {
             image_cache.clone(),
             event_loop_proxy.clone(),
             opts.color_scheme,
-            true,   // Add spacers before headers by default
-            false,  // Don't add spacers after headers by default
-            false,  // Don't add spacers before tables by default
-            true,   // Add spacers after tables by default
-            false,  // Don't add spacers after paragraphs by default
-            false,  // Don't add spacers after lists by default
+            true,   // Add spacers before headers - separate from previous content
+            false,  // Don't add spacers after headers - keep tables close
+            false,  // Don't add spacers before tables - keep close to headers
+            true,   // Add spacers after tables - separate from following content
+            true,   // Add spacers after paragraphs for separation
+            true,   // Add spacers after lists for separation
         );
 
         let (interpreter_sender, interpreter_receiver) = channel();
@@ -454,8 +454,8 @@ impl Inlyne {
             false,  // Don't add spacers after headers in help
             false,  // Don't add spacers before tables in help
             true,   // Add spacers after tables in help
-            false,  // Don't add spacers after paragraphs in help
-            false,  // Don't add spacers after lists in help
+            true,   // Add spacers after paragraphs in help
+            true,   // Add spacers after lists in help
         );
         
         // Use same element padding as regular documents (from opts)

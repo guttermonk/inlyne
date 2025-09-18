@@ -406,9 +406,15 @@ impl Process for FlowProcess {
                     output,
                 );
 
-                output.push_text_box(global, element, state);
-                if global.opts.add_spacers_after_paragraphs {
-                    output.push_spacer();
+                // Only push text box and add spacer if paragraph has actual content
+                let has_content = !element.texts.is_empty() && 
+                    element.texts.iter().any(|text| !text.text.trim().is_empty());
+                
+                if has_content {
+                    output.push_text_box(global, element, state);
+                    if global.opts.add_spacers_after_paragraphs {
+                        output.push_spacer();
+                    }
                 }
             }
             TagName::Anchor => {

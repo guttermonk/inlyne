@@ -10,7 +10,7 @@ use crate::text::TextSystem;
 use crate::utils::{Align, Point, Rect, Size};
 use crate::{debug_impls, Element};
 
-pub const DEFAULT_PADDING: f32 = 2.;
+pub const DEFAULT_PADDING: f32 = 1.;
 pub const DEFAULT_MARGIN: f32 = 100.;
 
 #[derive(Debug, PartialEq)]

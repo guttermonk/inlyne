@@ -43,7 +43,7 @@ impl Opts {
             metrics: None,
             position: None,
             size: None,
-            element_padding: 2.0,
+            element_padding: 1.0,
         }
     }
 }
