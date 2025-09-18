@@ -130,7 +130,8 @@ impl InterpreterOpts {
             color_scheme,
             true,  // Add spacers before headers for tests
             true,  // Add spacers after headers for tests
-            true,  // Add spacers around tables for tests
+            true,  // Add spacers before tables for tests
+            true,  // Add spacers after tables for tests
             true,  // Add spacers after paragraphs for tests
             true,  // Add spacers after lists for tests
         );

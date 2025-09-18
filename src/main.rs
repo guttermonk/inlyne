@@ -214,7 +214,8 @@ impl Inlyne {
             opts.color_scheme,
             true,   // Add spacers before headers by default
             false,  // Don't add spacers after headers by default
-            false,  // Don't add spacers around tables by default
+            false,  // Don't add spacers before tables by default
+            true,   // Add spacers after tables by default
             false,  // Don't add spacers after paragraphs by default
             false,  // Don't add spacers after lists by default
         );
@@ -451,7 +452,8 @@ impl Inlyne {
             self.opts.color_scheme,
             true,   // Add spacers before headers in help
             false,  // Don't add spacers after headers in help
-            false,  // Don't add spacers around tables in help
+            false,  // Don't add spacers before tables in help
+            true,   // Add spacers after tables in help
             false,  // Don't add spacers after paragraphs in help
             false,  // Don't add spacers after lists in help
         );
