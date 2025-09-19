@@ -47,7 +47,7 @@ use keybindings::{Key, KeyCombos, ModifiedKey};
 use metrics::{histogram, HistTag};
 use opts::{Cli, Config, Opts};
 use parking_lot::Mutex;
-use positioner::{Positioned, Row, Section, Spacer, DEFAULT_MARGIN, DEFAULT_PADDING};
+use positioner::{Positioned, Row, Section, Spacer, DEFAULT_MARGIN};
 use raw_window_handle::HasRawDisplayHandle;
 use renderer::Renderer;
 use table::Table;
