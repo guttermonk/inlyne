@@ -214,7 +214,10 @@ pub fn markdown_to_html(md: &str, syntax_theme: SyntectTheme) -> String {
     let custom = CustomSyntectAdapter(adapter);
     plugins.render.codefence_syntax_highlighter = Some(&custom);
 
-    let htmlified = markdown_to_html_with_plugins(md, &options, &plugins);
+    let mut htmlified = markdown_to_html_with_plugins(md, &options, &plugins);
+    
+    // Post-process HTML to support pandoc-style table captions
+    htmlified = add_pandoc_table_captions(htmlified);
 
     // Comrak doesn't support converting the front matter to HTML, so we have to convert it to an
     // HTML table ourselves. Front matter is found like so
@@ -246,6 +249,118 @@ pub fn markdown_to_html(md: &str, syntax_theme: SyntectTheme) -> String {
     };
 
     format!("{html_front_matter}{htmlified}")
+}
+
+/// Post-processes HTML to convert pandoc-style table captions into HTML <caption> tags.
+/// 
+/// Supports two pandoc caption styles:
+/// 1. "Table: caption text" before a table -> converts to <caption> at start of table
+/// 2. ": caption text" after a table -> converts to <caption> at start of table
+fn add_pandoc_table_captions(html: String) -> String {
+    let mut result = String::with_capacity(html.len());
+    let mut lines = html.lines().peekable();
+    let mut pending_caption: Option<String> = None;
+    
+    while let Some(line) = lines.next() {
+        // Check for caption before table (Table: caption text)
+        if line.starts_with("<p>Table: ") && line.ends_with("</p>") {
+            // Check if next non-empty line is a table
+            let mut temp_lines = Vec::new();
+            let mut found_table = false;
+            
+            while let Some(next_line) = lines.peek() {
+                if next_line.trim().is_empty() {
+                    temp_lines.push(lines.next().unwrap());
+                } else if next_line.starts_with("<table>") {
+                    found_table = true;
+                    break;
+                } else {
+                    break;
+                }
+            }
+            
+            if found_table {
+                // Extract caption text
+                let caption_text = &line[10..line.len() - 4]; // Remove "<p>Table: " and "</p>"
+                pending_caption = Some(caption_text.to_string());
+                // Add the empty lines we consumed
+                for temp_line in temp_lines {
+                    result.push_str(temp_line);
+                    result.push('\n');
+                }
+            } else {
+                // Not followed by a table, keep as regular paragraph
+                result.push_str(line);
+                result.push('\n');
+                // Add back the lines we consumed
+                for temp_line in temp_lines {
+                    result.push_str(temp_line);
+                    result.push('\n');
+                }
+            }
+        } 
+        // Check if we're at a table opening tag
+        else if line.starts_with("<table>") {
+            result.push_str("<table>\n");
+            
+            // If we have a pending caption, add it now
+            if let Some(caption) = pending_caption.take() {
+                result.push_str("<caption>");
+                result.push_str(&caption);
+                result.push_str("</caption>\n");
+            }
+        }
+        // Check for caption after table (: caption text)
+        else if line.starts_with("</table>") {
+            result.push_str(line);
+            result.push('\n');
+            
+            // Look ahead for a caption after the table
+            let mut temp_lines = Vec::new();
+            let mut found_caption = false;
+            
+            while let Some(next_line) = lines.peek() {
+                if next_line.trim().is_empty() {
+                    temp_lines.push(lines.next().unwrap());
+                } else if next_line.starts_with("<p>: ") && next_line.ends_with("</p>") {
+                    // Found a caption after the table
+                    let caption_line = lines.next().unwrap();
+                    let caption_text = &caption_line[5..caption_line.len() - 4]; // Remove "<p>: " and "</p>"
+                    
+                    // We need to insert the caption at the beginning of the table
+                    // Find the table start in our result
+                    if let Some(table_start) = result.rfind("<table>") {
+                        let table_start_end = table_start + 7; // Length of "<table>"
+                        let caption_html = format!("\n<caption>{}</caption>", caption_text);
+                        result.insert_str(table_start_end, &caption_html);
+                    }
+                    
+                    found_caption = true;
+                    break;
+                } else {
+                    break;
+                }
+            }
+            
+            // Add back any empty lines we consumed
+            if !found_caption {
+                for temp_line in temp_lines {
+                    result.push_str(temp_line);
+                    result.push('\n');
+                }
+            }
+        } else {
+            result.push_str(line);
+            result.push('\n');
+        }
+    }
+    
+    // Remove trailing newline if present
+    if result.ends_with('\n') {
+        result.pop();
+    }
+    
+    result
 }
 
 #[derive(Deserialize, Debug)]
@@ -294,5 +409,86 @@ impl Cell {
                 buf.push_str("{Skipped nested table}");
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_pandoc_caption_before_table() {
+        let md = r#"Table: This is a caption before the table
+
+| Column 1 | Column 2 | Column 3 |
+|----------|----------|----------|
+| Data 1   | Data 2   | Data 3   |
+| Data 4   | Data 5   | Data 6   |"#;
+
+        let html = markdown_to_html(md, SyntectTheme::default());
+        println!("Caption before table HTML:\n{}", html);
+        
+        // Check that the caption was converted to an HTML caption tag
+        assert!(html.contains("<caption>This is a caption before the table</caption>"));
+        assert!(html.contains("<table>"));
+        assert!(!html.contains("<p>Table: This is a caption before the table</p>"));
+    }
+
+    #[test]
+    fn test_pandoc_caption_after_table() {
+        let md = r#"| Header A | Header B | Header C |
+|----------|----------|----------|
+| Value 1  | Value 2  | Value 3  |
+| Value 4  | Value 5  | Value 6  |
+
+: This is a caption after the table"#;
+
+        let html = markdown_to_html(md, SyntectTheme::default());
+        println!("Caption after table HTML:\n{}", html);
+        
+        // Check that the caption was converted to an HTML caption tag
+        assert!(html.contains("<caption>This is a caption after the table</caption>"));
+        assert!(html.contains("<table>"));
+        assert!(!html.contains("<p>: This is a caption after the table</p>"));
+    }
+
+    #[test]
+    fn test_html_table_with_caption() {
+        let md = r#"<table>
+<caption>This is an HTML caption</caption>
+<tr>
+  <th>Name</th>
+  <th>Age</th>
+  <th>City</th>
+</tr>
+<tr>
+  <td>Alice</td>
+  <td>30</td>
+  <td>New York</td>
+</tr>
+</table>"#;
+
+        let html = markdown_to_html(md, SyntectTheme::default());
+        println!("HTML table with caption:\n{}", html);
+        
+        // HTML captions should be preserved
+        assert!(html.contains("<caption>"));
+        assert!(html.contains("This is an HTML caption"));
+    }
+
+    #[test]
+    fn test_regular_table_without_caption() {
+        let md = r#"| Fruit    | Color  | Price |
+|----------|--------|-------|
+| Apple    | Red    | $1.00 |
+| Banana   | Yellow | $0.50 |
+| Orange   | Orange | $0.75 |"#;
+
+        let html = markdown_to_html(md, SyntectTheme::default());
+        println!("Regular table HTML:\n{}", html);
+        
+        // Should have a table but no caption
+        assert!(html.contains("<table>"));
+        assert!(!html.contains("<caption>"));
     }
 }
