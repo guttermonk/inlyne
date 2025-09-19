@@ -979,9 +979,22 @@ impl Process for TableProcess {
         if global.opts.add_spacers_before_tables {
             output.push_spacer();
         }
+        
+        // Check if table has a caption with content
+        let has_caption = table.caption.as_ref()
+            .map(|c| c.texts.iter().any(|t| !t.text.trim().is_empty()))
+            .unwrap_or(false);
+        
         output.push_element(table);
         if global.opts.add_spacers_after_tables {
-            output.push_spacer();
+            // Add extra spacing after tables without captions to improve separation from next section
+            if !has_caption {
+                // Add a double spacer for tables without captions
+                output.push_spacer();
+                output.push_spacer();
+            } else {
+                output.push_spacer();
+            }
         }
     }
 }
@@ -1126,6 +1139,10 @@ impl Process for TableCaptionProcess {
             &mut Dummy,
         );
 
-        table.set_caption(tb);
+        // Only set caption if it has actual content (not empty and not just whitespace)
+        let has_content = tb.texts.iter().any(|text| !text.text.trim().is_empty());
+        if has_content {
+            table.set_caption(tb);
+        }
     }
 }

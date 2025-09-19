@@ -341,6 +341,23 @@ const VISIBLE_SPACER_AFTER_IMAGE: &str = "\
 ---
 ";
 
+const TABLE_WITHOUT_CAPTION: &str = r#"
+<table>
+<tr>
+<th>Name</th>
+<th>Value</th>
+</tr>
+<tr>
+<td>Item 1</td>
+<td>100</td>
+</tr>
+</table>
+
+## Next Section
+
+This section should have proper spacing from the table above.
+"#;
+
 snapshot_interpreted_elements!(
     // (footnotes_list_prefix, FOOTNOTES_LIST_PREFIX),
     (checklist_has_no_text_prefix, CHECKLIST_HAS_NO_TEXT_PREFIX),
@@ -353,6 +370,7 @@ snapshot_interpreted_elements!(
     (visible_spacer_after_image, VISIBLE_SPACER_AFTER_IMAGE),
     (table_with_caption, TABLE_WITH_CAPTION),
     (table_with_styled_caption, TABLE_WITH_STYLED_CAPTION),
+    (table_without_caption, TABLE_WITHOUT_CAPTION),
 );
 
 fn elem_as_text_box(elem: &Element) -> Option<&TextBox> {

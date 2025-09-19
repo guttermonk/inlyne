@@ -97,21 +97,25 @@ impl Table {
             .iter()
             .fold(0, |max, row| std::cmp::max(row.len(), max));
 
-        // Create caption node if present
+        // Create caption node if present and non-empty
         let caption_node = if let Some(ref caption) = self.caption {
-            let caption_clone = caption.clone();
-            let textbox_measure = TextBoxMeasure {
-                font_system: text_system.font_system.clone(),
-                text_cache: text_system.text_cache.clone(),
-                textbox: Arc::new(caption_clone),
-                zoom,
-            };
-            Some(taffy.new_leaf_with_measure(
-                Style::default(),
-                MeasureFunc::Boxed(Box::new(move |known_dimensions, available_space| {
-                    textbox_measure.measure(known_dimensions, available_space)
-                })),
-            )?)
+            if !caption.texts.is_empty() {
+                let caption_clone = caption.clone();
+                let textbox_measure = TextBoxMeasure {
+                    font_system: text_system.font_system.clone(),
+                    text_cache: text_system.text_cache.clone(),
+                    textbox: Arc::new(caption_clone),
+                    zoom,
+                };
+                Some(taffy.new_leaf_with_measure(
+                    Style::default(),
+                    MeasureFunc::Boxed(Box::new(move |known_dimensions, available_space| {
+                        textbox_measure.measure(known_dimensions, available_space)
+                    })),
+                )?)
+            } else {
+                None
+            }
         } else {
             None
         };

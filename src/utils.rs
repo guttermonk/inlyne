@@ -491,4 +491,50 @@ mod tests {
         assert!(html.contains("<table>"));
         assert!(!html.contains("<caption>"));
     }
+
+    #[test]
+    fn test_empty_caption() {
+        let md = r#"<table>
+<caption></caption>
+<tr>
+  <th>Header</th>
+  <th>Value</th>
+</tr>
+<tr>
+  <td>Row 1</td>
+  <td>Data 1</td>
+</tr>
+</table>"#;
+
+        let html = markdown_to_html(md, SyntectTheme::default());
+        println!("Empty caption HTML:\n{}", html);
+        
+        // Empty caption should not be in the output
+        assert!(html.contains("<table>"));
+        assert!(html.contains("<th>Header</th>"));
+        // The empty caption tag should still be present in HTML but won't create visual space
+        assert!(html.contains("<caption></caption>"));
+    }
+
+    #[test]
+    fn test_whitespace_only_caption() {
+        let md = r#"<table>
+<caption>   </caption>
+<tr>
+  <th>Name</th>
+  <th>Age</th>
+</tr>
+<tr>
+  <td>Alice</td>
+  <td>30</td>
+</tr>
+</table>"#;
+
+        let html = markdown_to_html(md, SyntectTheme::default());
+        println!("Whitespace-only caption HTML:\n{}", html);
+        
+        // Whitespace-only caption should be preserved in HTML
+        assert!(html.contains("<table>"));
+        assert!(html.contains("<caption>   </caption>"));
+    }
 }
