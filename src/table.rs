@@ -7,6 +7,7 @@ use taffy::node::MeasureFunc;
 use taffy::prelude::{
     auto, line, points, AvailableSpace, Display, Layout, Size as TaffySize, Style, Taffy,
 };
+use taffy::style::FlexDirection;
 use taffy::style::JustifyContent;
 
 pub const TABLE_ROW_GAP: f32 = 20.;
@@ -15,17 +16,23 @@ pub const TABLE_COL_GAP: f32 = 20.;
 #[derive(Debug)]
 pub struct TableLayout {
     pub rows: Vec<Vec<Layout>>,
+    pub caption_layout: Option<Layout>,
     pub size: Size,
 }
 
 #[derive(Default, Debug, PartialEq)]
 pub struct Table {
     pub rows: Vec<Vec<TextBox>>,
+    pub caption: Option<TextBox>,
 }
 
 impl Table {
     pub fn new() -> Table {
         Table::default()
+    }
+
+    pub fn set_caption(&mut self, caption: TextBox) {
+        self.caption = Some(caption);
     }
 
     pub fn find_hoverable<'a>(
@@ -38,6 +45,24 @@ impl Table {
         zoom: f32,
     ) -> Option<&'a Text> {
         let table_layout = self.layout(text_system, taffy, bounds, zoom).ok()?;
+
+        // Check caption first if it exists
+        if let (Some(caption), Some(caption_layout)) = (&self.caption, &table_layout.caption_layout) {
+            if Rect::new(
+                (pos.0 + caption_layout.location.x, pos.1 + caption_layout.location.y),
+                (caption_layout.size.width, caption_layout.size.height),
+            )
+            .contains(loc)
+            {
+                return caption.find_hoverable(
+                    text_system,
+                    loc,
+                    (pos.0 + caption_layout.location.x, pos.1 + caption_layout.location.y),
+                    (caption_layout.size.width, caption_layout.size.height),
+                    zoom,
+                );
+            }
+        }
 
         for (row, row_layout) in self.rows.iter().zip(table_layout.rows.iter()) {
             for (item, layout) in row.iter().zip(row_layout.iter()) {
@@ -72,9 +97,29 @@ impl Table {
             .iter()
             .fold(0, |max, row| std::cmp::max(row.len(), max));
 
+        // Create caption node if present
+        let caption_node = if let Some(ref caption) = self.caption {
+            let caption_clone = caption.clone();
+            let textbox_measure = TextBoxMeasure {
+                font_system: text_system.font_system.clone(),
+                text_cache: text_system.text_cache.clone(),
+                textbox: Arc::new(caption_clone),
+                zoom,
+            };
+            Some(taffy.new_leaf_with_measure(
+                Style::default(),
+                MeasureFunc::Boxed(Box::new(move |known_dimensions, available_space| {
+                    textbox_measure.measure(known_dimensions, available_space)
+                })),
+            )?)
+        } else {
+            None
+        };
+
         // Setup the grid
         let root_style = Style {
             display: Display::Flex,
+            flex_direction: FlexDirection::Column,
             size: TaffySize {
                 width: points(bounds.0),
                 height: auto(),
@@ -126,7 +171,18 @@ impl Table {
         }
 
         let grid = taffy.new_with_children(grid_style, &flattened_nodes)?;
-        let root = taffy.new_with_children(root_style, &[grid])?;
+        
+        // Create the root container with caption and table
+        let mut root_children = Vec::new();
+        let caption_node_ref = if let Some(caption_node) = caption_node {
+            root_children.push(caption_node);
+            Some(caption_node)
+        } else {
+            None
+        };
+        root_children.push(grid);
+        
+        let root = taffy.new_with_children(root_style, &root_children)?;
 
         taffy.compute_layout(
             root,
@@ -140,10 +196,18 @@ impl Table {
             .into_iter()
             .map(|row| row.iter().map(|n| *taffy.layout(*n).unwrap()).collect())
             .collect();
+        
+        let caption_layout = if let Some(caption_node_ref) = caption_node_ref {
+            Some(*taffy.layout(caption_node_ref)?)
+        } else {
+            None
+        };
+        
         let size = taffy.layout(root)?.size;
 
         Ok(TableLayout {
             rows: rows_layout,
+            caption_layout,
             size: (size.width, size.height),
         })
     }

@@ -297,8 +297,43 @@ const COLLAPSED_SECTION: &str = "\
 <summary>summary</summary>
 
 collapsed text
-</details>
-";
+</details>";
+
+const TABLE_WITH_CAPTION: &str = r#"
+<table>
+<caption>Basic Table Caption</caption>
+<thead>
+<tr>
+<th>Name</th>
+<th>Age</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Alice</td>
+<td>25</td>
+</tr>
+<tr>
+<td>Bob</td>
+<td>30</td>
+</tr>
+</tbody>
+</table>
+"#;
+
+const TABLE_WITH_STYLED_CAPTION: &str = r#"
+<table>
+<caption style="color: red; font-weight: bold;" align="center">Red Bold Centered Caption</caption>
+<tr>
+<td>Data 1</td>
+<td>Data 2</td>
+</tr>
+<tr>
+<td>Data 3</td>
+<td>Data 4</td>
+</tr>
+</table>
+"#;
 
 const VISIBLE_SPACER_AFTER_IMAGE: &str = "\
 ![](assets/test_data/rgb8.png)
@@ -316,6 +351,8 @@ snapshot_interpreted_elements!(
     (header_inherit_align, HEADER_INHERIT_ALIGN),
     (collapsed_section, COLLAPSED_SECTION),
     (visible_spacer_after_image, VISIBLE_SPACER_AFTER_IMAGE),
+    (table_with_caption, TABLE_WITH_CAPTION),
+    (table_with_styled_caption, TABLE_WITH_STYLED_CAPTION),
 );
 
 fn elem_as_text_box(elem: &Element) -> Option<&TextBox> {

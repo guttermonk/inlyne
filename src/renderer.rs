@@ -386,6 +386,38 @@ impl Renderer {
                         self.zoom,
                     )?;
 
+                    // Render caption if it exists
+                    if let (Some(caption), Some(caption_layout)) = (&table.caption, &layout.caption_layout) {
+                        text_areas.push(caption.text_areas(
+                            &mut self.text_system,
+                            (pos.0 + caption_layout.location.x, pos.1 + caption_layout.location.y),
+                            (caption_layout.size.width, f32::MAX),
+                            self.zoom,
+                            self.scroll_y,
+                        ));
+
+                        if let Some(selection_rects) = caption.render_selection(
+                            &mut self.text_system,
+                            (pos.0 + caption_layout.location.x, pos.1 + caption_layout.location.y),
+                            (caption_layout.size.width, caption_layout.size.height),
+                            self.zoom,
+                            selection,
+                        ) {
+                            for rect in selection_rects {
+                                self.draw_rectangle(
+                                    Rect::from_min_max(
+                                        (rect.pos.0, rect.pos.1 - self.scroll_y),
+                                        (rect.max().0, rect.max().1 - self.scroll_y),
+                                    ),
+                                    native_color(
+                                        self.theme.select_color,
+                                        &self.surface_format,
+                                    ),
+                                )?;
+                            }
+                        }
+                    }
+
                     for (row, node_row) in layout.rows.iter().enumerate() {
                         for (col, node) in node_row.iter().enumerate() {
                             if let Some(row) = table.rows.get(row) {

@@ -617,6 +617,9 @@ impl Process for FlowProcess {
             TagName::TableHead | TagName::TableBody => {
                 tracing::warn!("TableHead and TableBody can only be in an Table element");
             }
+            TagName::TableCaption => {
+                tracing::warn!("TableCaption can only be in an Table element");
+            }
             TagName::TableRow => tracing::warn!("TableRow can only be in an Table element"),
             TagName::TableDataCell => {
                 tracing::warn!(
@@ -958,6 +961,9 @@ impl Process for TableProcess {
             &node.content,
             |node| {
                 match node.tag {
+                    TagName::TableCaption => {
+                        TableCaptionProcess::process(global, &mut table, state.borrow(), node, output);
+                    }
                     TagName::TableHead | TagName::TableBody => {
                         TableHeadProcess::process(global, &mut table, state.borrow(), node, output);
                     }
@@ -965,7 +971,7 @@ impl Process for TableProcess {
                         table.rows.push(vec![]);
                         TableRowProcess::process(global, &mut table, state.borrow(), node, output)
                     }
-                    _ => tracing::warn!("Only TableHead, TableBody, TableRow and TableFoot can be inside an table, found: {:?}", node.tag),
+                    _ => tracing::warn!("Only TableCaption, TableHead, TableBody, TableRow and TableFoot can be inside an table, found: {:?}", node.tag),
                 }
             },
             |_| {},
@@ -1076,5 +1082,50 @@ impl Process for TableCellProcess {
         );
 
         row.push(tb);
+    }
+}
+
+struct TableCaptionProcess;
+impl Process for TableCaptionProcess {
+    type Context<'a> = &'a mut Table;
+    fn process(
+        global: &Static,
+        table: Self::Context<'_>,
+        mut state: State,
+        node: &HirNode,
+        _output: &mut impl Push<Element>,
+    ) {
+        let attributes = &node.attributes;
+        state.set_align_from_attributes(attributes);
+        
+        // Apply style attributes for font color
+        let style_str = attributes
+            .iter()
+            .find_map(|attr| attr.to_style())
+            .unwrap_or_default();
+        for style in style::Iter::new(&style_str) {
+            match style {
+                Style::Color(color) => {
+                    state.span.color = global.opts.native_color(color);
+                }
+                Style::FontWeight(weight) => state.span.weight = weight,
+                Style::FontStyle(style) => state.span.style = style,
+                Style::TextDecoration(decor) => state.span.decor = decor,
+                _ => {}
+            }
+        }
+
+        let mut tb = TextBox::new(vec![], global.opts.hidpi_scale);
+        tb.set_align_or_default(state.text_options.align);
+
+        FlowProcess::process_content(
+            global,
+            &mut tb,
+            state,
+            &node.content,
+            &mut Dummy,
+        );
+
+        table.set_caption(tb);
     }
 }

@@ -30,6 +30,7 @@ pub enum TagName {
     Summary,
     Table,
     TableBody,
+    TableCaption,
     TableDataCell,
     TableHead,
     TableHeader,
@@ -69,6 +70,7 @@ impl TagName {
             | TagName::Summary
             | TagName::Table
             | TagName::TableBody
+            | TagName::TableCaption
             | TagName::TableDataCell
             | TagName::TableHead
             | TagName::TableHeader
@@ -114,6 +116,7 @@ impl TryFrom<&Atom<LocalNameStaticSet>> for TagName {
             &local_name!("summary") => Self::Summary,
             &local_name!("table") => Self::Table,
             &local_name!("tbody") => Self::TableBody,
+            &local_name!("caption") => Self::TableCaption,
             &local_name!("td") => Self::TableDataCell,
             &local_name!("th") => Self::TableHeader,
             &local_name!("thead") => Self::TableHead,
