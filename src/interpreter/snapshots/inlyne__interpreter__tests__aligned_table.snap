@@ -124,6 +124,7 @@ expression: "interpret_md_with_opts(text, opts)"
                     },
                 ],
             ],
+            caption: None,
         },
     ),
     Spacer(
