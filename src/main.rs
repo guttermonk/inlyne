@@ -403,8 +403,9 @@ impl Inlyne {
         // Process elements one by one
         for (idx, element) in elements_vec.into_iter().enumerate() {
             // Check if this is a table without caption following a header
-            let mut position_flush_with_header = false;
-            let mut header_bottom = 0.0;
+            let mut bypass_positioner = false;
+            let mut manual_position = (0.0, 0.0);
+            let mut manual_size = (0.0, 0.0);
             
             if let Element::Table(ref table) = element {
                 let has_caption = table.caption.as_ref()
@@ -416,11 +417,18 @@ impl Inlyne {
                     for j in (0..elements.len()).rev() {
                         match &elements[j].inner {
                             Element::TextBox(tb) if tb.is_anchor.is_some() => {
-                                // Found header - position table flush with it
-                                let bounds = elements[j].bounds.as_ref().unwrap();
-                                header_bottom = bounds.pos.1 + bounds.size.1;
-                                position_flush_with_header = true;
-                                tracing::info!("Found header before table without caption at idx {}", idx);
+                                // Found header - bypass positioner entirely
+                                let header_bounds = elements[j].bounds.as_ref().unwrap();
+                                // Position table EXACTLY at header bottom with zero gap
+                                manual_position = (header_bounds.pos.0, header_bounds.pos.1 + header_bounds.size.1);
+                                
+                                // Calculate table size manually (approximate)
+                                let page_width = 700.0;
+                                let page_margin = 50.0;
+                                manual_size = (page_width - 2.0 * page_margin, 100.0); // Will be adjusted
+                                
+                                bypass_positioner = true;
+                                tracing::info!("BYPASSING positioner for table at idx {} - manual position y={:.2}", idx, manual_position.1);
                                 break;
                             }
                             Element::Spacer(_) => continue, // Skip spacers
@@ -462,34 +470,36 @@ impl Inlyne {
                 continue;
             }
             
-            // Position the element
+            // Create positioned element
             let mut positioned_element = Positioned::new(element);
             
-            if position_flush_with_header {
-                // Custom positioning for table flush with header
-                renderer.positioner.reserved_height = header_bottom;
-                
-                // Position at the exact header bottom
-                renderer
-                    .positioner
-                    .position(
+            if bypass_positioner {
+                // Manually set bounds, completely bypassing the positioner
+                // First, measure the table properly
+                if let Element::Table(ref table) = positioned_element.inner {
+                    let layout = table.layout(
                         &mut renderer.text_system,
-                        &mut positioned_element,
+                        &mut renderer.positioner.taffy,
+                        manual_size,
                         renderer.zoom,
-                        renderer.element_padding,
-                    )
-                    .unwrap();
+                    ).unwrap();
+                    manual_size.1 = layout.size.1;
+                }
                 
-                // Get the table height
-                let table_height = positioned_element.bounds.as_ref().unwrap().size.1;
+                // Set the bounds manually
+                positioned_element.bounds = Some(crate::utils::Rect::new(
+                    manual_position,
+                    manual_size,
+                ));
                 
-                // Update reserved height with table height
-                renderer.positioner.reserved_height = header_bottom + table_height;
+                // Update reserved height to exactly where the table ends
+                renderer.positioner.reserved_height = manual_position.1 + manual_size.1;
                 
                 // Add extra 6px padding after table without caption
                 renderer.positioner.reserved_height += 6.0 * renderer.hidpi_scale * renderer.zoom;
                 
-                tracing::info!("✓ Positioned table FLUSH with header at y={:.2}", header_bottom);
+                tracing::info!("✓ BYPASSED positioner - table at EXACT position y={:.2}, height={:.2}", 
+                    manual_position.1, manual_size.1);
             } else {
                 // Normal positioning
                 renderer
