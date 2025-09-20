@@ -156,7 +156,7 @@ impl Table {
                 };
                 node_row.push(taffy.new_leaf_with_measure(
                     Style {
-                        grid_row: line(1 + y as i16 + 1),
+                        grid_row: line(y as i16 + 1),
                         grid_column: line(x as i16 + 1),
                         ..default()
                     },
@@ -176,20 +176,21 @@ impl Table {
 
         let grid = taffy.new_with_children(grid_style, &flattened_nodes)?;
         
-        // Create the root container with caption and table
-        let mut root_children = Vec::new();
-        let caption_node_ref = if let Some(caption_node) = caption_node {
+        // Only create root container if we have a caption
+        let (layout_root, caption_node_ref) = if let Some(caption_node) = caption_node {
+            // Create flex container for caption + grid
+            let mut root_children = Vec::new();
             root_children.push(caption_node);
-            Some(caption_node)
+            root_children.push(grid);
+            let root = taffy.new_with_children(root_style, &root_children)?;
+            (root, Some(caption_node))
         } else {
-            None
+            // No caption - use grid directly without wrapper
+            (grid, None)
         };
-        root_children.push(grid);
-        
-        let root = taffy.new_with_children(root_style, &root_children)?;
 
         taffy.compute_layout(
-            root,
+            layout_root,
             TaffySize::<AvailableSpace> {
                 width: AvailableSpace::Definite(bounds.0),
                 height: AvailableSpace::MaxContent,
@@ -207,7 +208,7 @@ impl Table {
             None
         };
         
-        let size = taffy.layout(root)?.size;
+        let size = taffy.layout(layout_root)?.size;
 
         Ok(TableLayout {
             rows: rows_layout,
