@@ -400,12 +400,26 @@ impl Inlyne {
 
         let elements_vec: Vec<Element> = element_queue.lock().drain(..).collect();
         
-        // Quick check: are there any spacers between headers and tables?
+        // Quick check: are there any spacers or empty TextBoxes between headers and tables?
         for i in 0..elements_vec.len().saturating_sub(1) {
-            if let (Element::TextBox(tb), Element::Spacer(_)) = (&elements_vec[i], &elements_vec[i + 1]) {
-                if tb.is_anchor.is_some() && i + 2 < elements_vec.len() {
-                    if matches!(&elements_vec[i + 2], Element::Table(_)) {
-                        tracing::warn!("SPACER found between header and table!");
+            if let Element::TextBox(tb) = &elements_vec[i] {
+                if tb.is_anchor.is_some() {
+                    // Check what follows this header
+                    for j in (i + 1)..elements_vec.len().min(i + 3) {
+                        match &elements_vec[j] {
+                            Element::Spacer(_) => {
+                                if j + 1 < elements_vec.len() && matches!(&elements_vec[j + 1], Element::Table(_)) {
+                                    tracing::warn!("SPACER found between header at [{}] and table at [{}]!", i, j + 1);
+                                }
+                            }
+                            Element::TextBox(empty_tb) if empty_tb.texts.is_empty() => {
+                                if j + 1 < elements_vec.len() && matches!(&elements_vec[j + 1], Element::Table(_)) {
+                                    tracing::warn!("Empty TextBox found between header at [{}] and table at [{}]!", i, j + 1);
+                                }
+                            }
+                            Element::Table(_) => break, // Found table, stop checking
+                            _ => {}
+                        }
                     }
                 }
             }
@@ -432,30 +446,50 @@ impl Inlyne {
             let element_height = positioned_element.bounds.as_ref().unwrap().size.1;
             renderer.positioner.reserved_height += element_height;
             
-            // Check if previous element was a header and current is a table without caption
-            // If so, we need to remove the padding that was added after the header
+            // Check if we need to adjust spacing for header-table combinations
             if elements.len() > 0 {
-                let prev_was_header = match &elements.last().unwrap().inner {
-                    Element::TextBox(tb) => tb.is_anchor.is_some(),
-                    _ => false
-                };
+                // Check if previous element was a header or if there's an empty TextBox after a header
+                let mut header_index = None;
+                let mut padding_adjustments_needed = 0;
                 
-                if prev_was_header {
+                // Look back for a header (could be separated by empty TextBoxes)
+                for i in (0..elements.len()).rev() {
+                    match &elements[i].inner {
+                        Element::TextBox(tb) if tb.is_anchor.is_some() => {
+                            header_index = Some(i);
+                            break;
+                        }
+                        Element::TextBox(tb) if tb.texts.is_empty() => {
+                            // Empty TextBox, keep looking
+                            padding_adjustments_needed += 1;
+                        }
+                        _ => break, // Something else, stop looking
+                    }
+                }
+                
+                if let Some(_) = header_index {
                     if let Element::Table(ref table) = positioned_element.inner {
                         let has_caption = table.caption.as_ref()
                             .map(|c| !c.texts.is_empty() && c.texts.iter().any(|t| !t.text.trim().is_empty()))
                             .unwrap_or(false);
                         
                         if !has_caption {
-                            // Header followed by table without caption - remove the padding
-                            // that was added after the header
-                            let padding_to_remove = renderer.element_padding * renderer.hidpi_scale * renderer.zoom;
+                            // Header (possibly with empty TextBoxes) followed by table without caption
+                            // Remove padding for each element between header and table
+                            let padding_per_element = renderer.element_padding * renderer.hidpi_scale * renderer.zoom;
+                            let total_padding_to_remove = padding_per_element * (padding_adjustments_needed + 1) as f32;
                             let old_pos = positioned_element.bounds.as_ref().unwrap().pos.1;
-                            renderer.positioner.reserved_height -= padding_to_remove;
-                            positioned_element.bounds.as_mut().unwrap().pos.1 -= padding_to_remove;
+                            renderer.positioner.reserved_height -= total_padding_to_remove;
+                            positioned_element.bounds.as_mut().unwrap().pos.1 -= total_padding_to_remove;
                             let new_pos = positioned_element.bounds.as_ref().unwrap().pos.1;
-                            tracing::info!("✓ REMOVED {:.2}px padding: header→table (no caption). Table moved from y={:.2} to y={:.2}", 
-                                padding_to_remove, old_pos, new_pos);
+                            
+                            if padding_adjustments_needed > 0 {
+                                tracing::info!("✓ REMOVED {:.2}px padding ({} empty elements): header→table (no caption). Table moved from y={:.2} to y={:.2}", 
+                                    total_padding_to_remove, padding_adjustments_needed, old_pos, new_pos);
+                            } else {
+                                tracing::info!("✓ REMOVED {:.2}px padding: header→table (no caption). Table moved from y={:.2} to y={:.2}", 
+                                    total_padding_to_remove, old_pos, new_pos);
+                            }
                         } else {
                             tracing::info!("✗ KEPT padding: header→table (has caption)");
                         }
