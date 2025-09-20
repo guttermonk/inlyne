@@ -526,6 +526,7 @@ impl Process for FlowProcess {
                 state.text_options.bold = true;
                 state.text_options.header_color = Some(global.opts.native_color(global.opts.theme.header_color));
                 element.font_size *= header.size_multiplier();
+                element.is_header = true;
 
                 if header == HeaderType::H1 {
                     state.text_options.underline = true;

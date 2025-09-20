@@ -70,6 +70,8 @@ pub struct TextBox {
     pub is_checkbox: Option<bool>,
     #[debug(wrapper = DebugInline)]
     pub is_anchor: Option<String>,
+    #[debug(wrapper = DebugInline)]
+    pub is_header: bool,
     #[debug(no_skip)]
     pub texts: Vec<Text>,
     #[debug(skip)]
@@ -86,6 +88,7 @@ impl Default for TextBox {
             is_quote_block: None,
             is_checkbox: None,
             is_anchor: None,
+            is_header: false,
             align: Align::default(),
             hidpi_scale: 1.0,
             padding_height: 0.0,
