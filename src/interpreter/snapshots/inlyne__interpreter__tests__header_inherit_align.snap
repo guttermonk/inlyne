@@ -12,6 +12,7 @@ expression: "interpret_md_with_opts(text, opts)"
         TextBox {
             align: Center,
             is_anchor: Some("#install---------usage-"),
+            is_header: true,
             texts: [
                 Text {
                     text: "Install",

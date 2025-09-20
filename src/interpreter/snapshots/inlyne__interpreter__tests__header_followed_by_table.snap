@@ -11,6 +11,7 @@ expression: "interpret_md_with_opts(text, opts)"
         TextBox {
             font_size: 24.0,
             is_anchor: Some("#section-header"),
+            is_header: true,
             texts: [
                 Text {
                     text: "Section Header",
