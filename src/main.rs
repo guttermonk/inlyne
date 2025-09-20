@@ -447,10 +447,46 @@ impl Inlyne {
         tracing::info!("Removed {} elements between headers and tables", elements_to_remove.len());
         
         // SECOND: Position remaining elements normally
-        let mut last_was_header_without_caption_table = false;
-        
-        for element in elements_vec {
-            let mut positioned_element = Positioned::new(element);
+        // Convert to indexed iteration to look ahead
+        for i in 0..elements_vec.len() {
+            let mut positioned_element = Positioned::new(elements_vec[i].clone());
+            
+            // Log element type and current reserved_height
+            let element_type = match &positioned_element.inner {
+                Element::TextBox(tb) if tb.is_header => "HEADER",
+                Element::TextBox(_) => "TextBox",
+                Element::Table(_) => "TABLE",
+                Element::Spacer(_) => "Spacer",
+                Element::Image(_) => "Image",
+                Element::Row(_) => "Row",
+                Element::Section(_) => "Section",
+            };
+            
+            let reserved_before = renderer.positioner.reserved_height;
+            tracing::info!("Positioning element {} ({}). Reserved height BEFORE: {:.2}px", 
+                         i, element_type, reserved_before);
+            
+            // Check if current element is a header followed by a table without caption
+            let is_header_before_table = if let Element::TextBox(ref tb) = positioned_element.inner {
+                if tb.is_header && i + 1 < elements_vec.len() {
+                    // Check if next element is a table without caption
+                    if let Element::Table(ref table) = elements_vec[i + 1] {
+                        let no_caption = table.caption.as_ref()
+                            .map(|c| c.texts.is_empty() || c.texts.iter().all(|t| t.text.trim().is_empty()))
+                            .unwrap_or(true);
+                        if no_caption {
+                            tracing::warn!(">>> HEADER BEFORE TABLE WITHOUT CAPTION DETECTED! <<<");
+                        }
+                        no_caption
+                    } else {
+                        false
+                    }
+                } else {
+                    false
+                }
+            } else {
+                false
+            };
             
             // Position the element
             renderer
@@ -463,28 +499,25 @@ impl Inlyne {
                 )
                 .unwrap();
             
-            let element_height = positioned_element.bounds.as_ref().unwrap().size.1;
+            let element_bounds = positioned_element.bounds.as_ref().unwrap();
+            let element_height = element_bounds.size.1;
+            let element_y = element_bounds.pos.1;
+            
+            tracing::info!("  Element positioned at Y={:.2}px, height={:.2}px, bottom={:.2}px", 
+                         element_y, element_height, element_y + element_height);
+            
             renderer.positioner.reserved_height += element_height;
             
-            // Add padding - but not after headers that have tables following
-            if !last_was_header_without_caption_table {
+            // Add padding after element UNLESS it's a header before a table without caption
+            if !is_header_before_table {
                 let padding = renderer.element_padding * renderer.hidpi_scale * renderer.zoom;
                 renderer.positioner.reserved_height += padding;
+                tracing::info!("  Added padding: {:.2}px. New reserved height: {:.2}px", 
+                            padding, renderer.positioner.reserved_height);
             } else {
-                tracing::info!("Skipped padding after header before table without caption");
-            }
-            
-            // No extra padding needed - we want tables directly after headers with no gap
-            
-            // Track if this was a header that will be followed by a table without caption
-            last_was_header_without_caption_table = false;
-            if let Element::TextBox(ref tb) = positioned_element.inner {
-                if tb.is_header {
-                    // This is a header, check if it's followed by a table without caption
-                    // Since we removed elements between, the next element (if table without caption) 
-                    // will be right after
-                    last_was_header_without_caption_table = true;
-                }
+                tracing::warn!("  >>> SKIPPED PADDING after header! Reserved height: {:.2}px <<<", 
+                            renderer.positioner.reserved_height);
+                tracing::warn!("  >>> Gap between header bottom and next element will be: 0.00px <<<");
             }
             
             elements.push(positioned_element);
