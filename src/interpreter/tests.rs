@@ -358,6 +358,22 @@ const TABLE_WITHOUT_CAPTION: &str = r#"
 This section should have proper spacing from the table above.
 "#;
 
+const HEADER_FOLLOWED_BY_TABLE: &str = r#"
+## Section Header
+<table>
+<tr>
+<th>Column A</th>
+<th>Column B</th>
+</tr>
+<tr>
+<td>Data 1</td>
+<td>Data 2</td>
+</tr>
+</table>
+
+This paragraph follows the table.
+"#;
+
 snapshot_interpreted_elements!(
     // (footnotes_list_prefix, FOOTNOTES_LIST_PREFIX),
     (checklist_has_no_text_prefix, CHECKLIST_HAS_NO_TEXT_PREFIX),
@@ -371,6 +387,7 @@ snapshot_interpreted_elements!(
     (table_with_caption, TABLE_WITH_CAPTION),
     (table_with_styled_caption, TABLE_WITH_STYLED_CAPTION),
     (table_without_caption, TABLE_WITHOUT_CAPTION),
+    (header_followed_by_table, HEADER_FOLLOWED_BY_TABLE),
 );
 
 fn elem_as_text_box(elem: &Element) -> Option<&TextBox> {

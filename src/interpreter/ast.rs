@@ -207,7 +207,10 @@ impl Ast {
                         global.input.get(node),
                         &mut out,
                     );
-                    out.push_text_box(&global, &mut tb, state);
+                    // Only push text box if it has content after processing
+                    if !tb.texts.is_empty() {
+                        out.push_text_box(&global, &mut tb, state);
+                    }
                     Some(out)
                 }
                 TextOrHirNode::Text(text) => {
@@ -414,16 +417,20 @@ impl Process for FlowProcess {
                     output,
                 );
 
-                // Check if paragraph has meaningful text content
-                let has_text_content = !element.texts.is_empty() && 
-                    element.texts.iter().any(|text| !text.text.trim().is_empty());
+                // Check if paragraph has actual text content (not just whitespace)
+                let has_text_content = element.texts.iter().any(|text| !text.text.trim().is_empty());
                 
                 // Check if other elements (like images) were added during content processing
                 let added_other_elements = output.len() > output_size_before;
                 
-                // Only push text box and spacer if paragraph has content or added elements
-                if has_text_content || added_other_elements {
+                // Only push text box if paragraph has actual content
+                if has_text_content {
                     output.push_text_box(global, element, state);
+                    if global.opts.add_spacers_after_paragraphs {
+                        output.push_spacer();
+                    }
+                } else if added_other_elements {
+                    // If no text but other elements were added (like images), still add spacing
                     if global.opts.add_spacers_after_paragraphs {
                         output.push_spacer();
                     }
@@ -505,7 +512,10 @@ impl Process for FlowProcess {
                 FlowProcess::process_content(global, element, state, &node.content, output);
             }
             TagName::Header(header) => {
-                output.push_text_box(global, element, state.borrow());
+                // Only push the existing text box if it has content
+                if !element.texts.is_empty() {
+                    output.push_text_box(global, element, state.borrow());
+                }
                 if global.opts.add_spacers_before_headers {
                     output.push_spacer();
                 }
@@ -976,14 +986,14 @@ impl Process for TableProcess {
             },
             |_| {},
         );
-        if global.opts.add_spacers_before_tables {
-            output.push_spacer();
-        }
-        
         // Check if table has a caption with content
         let has_caption = table.caption.as_ref()
             .map(|c| c.texts.iter().any(|t| !t.text.trim().is_empty()))
             .unwrap_or(false);
+        
+        if global.opts.add_spacers_before_tables {
+            output.push_spacer();
+        }
         
         output.push_element(table);
         if global.opts.add_spacers_after_tables {

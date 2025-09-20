@@ -1,0 +1,105 @@
+---
+source: src/interpreter/tests.rs
+description: " --- md\n\n\n## Section Header\n<table>\n<tr>\n<th>Column A</th>\n<th>Column B</th>\n</tr>\n<tr>\n<td>Data 1</td>\n<td>Data 2</td>\n</tr>\n</table>\n\nThis paragraph follows the table.\n\n\n --- html\n\n<h2>Section Header</h2>\n<table>\n<tr>\n<th>Column A</th>\n<th>Column B</th>\n</tr>\n<tr>\n<td>Data 1</td>\n<td>Data 2</td>\n</tr>\n</table>\n<p>This paragraph follows the table.</p>"
+expression: "interpret_md_with_opts(text, opts)"
+---
+[
+    Spacer(
+        InvisibleSpacer(5),
+    ),
+    TextBox(
+        TextBox {
+            font_size: 24.0,
+            is_anchor: Some("#section-header"),
+            texts: [
+                Text {
+                    text: "Section Header",
+                    color: Some(Color(BLACK)),
+                    style: BOLD ,
+                    ..
+                },
+            ],
+            ..
+        },
+    ),
+    Spacer(
+        InvisibleSpacer(5),
+    ),
+    Spacer(
+        InvisibleSpacer(5),
+    ),
+    Table(
+        Table {
+            rows: [
+                [
+                    TextBox {
+                        texts: [
+                            Text {
+                                text: "Column A",
+                                default_color: Color(BLACK),
+                                style: BOLD ,
+                                ..
+                            },
+                        ],
+                        ..
+                    },
+                    TextBox {
+                        texts: [
+                            Text {
+                                text: "Column B",
+                                default_color: Color(BLACK),
+                                style: BOLD ,
+                                ..
+                            },
+                        ],
+                        ..
+                    },
+                ],
+                [
+                    TextBox {
+                        texts: [
+                            Text {
+                                text: "Data 1",
+                                default_color: Color(BLACK),
+                                ..
+                            },
+                        ],
+                        ..
+                    },
+                    TextBox {
+                        texts: [
+                            Text {
+                                text: "Data 2",
+                                default_color: Color(BLACK),
+                                ..
+                            },
+                        ],
+                        ..
+                    },
+                ],
+            ],
+            caption: None,
+        },
+    ),
+    Spacer(
+        InvisibleSpacer(5),
+    ),
+    Spacer(
+        InvisibleSpacer(5),
+    ),
+    TextBox(
+        TextBox {
+            texts: [
+                Text {
+                    text: "This paragraph follows the table.",
+                    default_color: Color(BLACK),
+                    ..
+                },
+            ],
+            ..
+        },
+    ),
+    Spacer(
+        InvisibleSpacer(5),
+    ),
+]
