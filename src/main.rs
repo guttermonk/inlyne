@@ -406,7 +406,7 @@ impl Inlyne {
         for i in 0..elements_vec.len() {
             // Find headers
             if let Element::TextBox(ref tb) = elements_vec[i] {
-                if tb.is_anchor.is_some() {
+                if tb.is_header {
                     // Found a header, look for next table
                     let mut found_table_without_caption = false;
                     let mut table_idx = 0;
@@ -486,17 +486,12 @@ impl Inlyne {
                 tracing::info!("Skipped padding after header before table without caption");
             }
             
-            // Add extra padding after tables without captions
-            if is_table_after_header {
-                let extra_padding = 6.0 * renderer.hidpi_scale * renderer.zoom;
-                renderer.positioner.reserved_height += extra_padding;
-                tracing::info!("Added {:.2}px extra padding after table without caption", extra_padding);
-            }
+            // No extra padding needed - we want tables directly after headers with no gap
             
             // Track if this was a header that will be followed by a table without caption
             last_was_header_without_caption_table = false;
             if let Element::TextBox(ref tb) = positioned_element.inner {
-                if tb.is_anchor.is_some() {
+                if tb.is_header {
                     // This is a header, check if it's followed by a table without caption
                     // Since we removed elements between, the next element (if table without caption) 
                     // will be right after

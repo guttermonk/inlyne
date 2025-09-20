@@ -225,40 +225,38 @@ impl Positioner {
     ) -> anyhow::Result<()> {
         self.reserved_height = element_padding * self.hidpi_scale * zoom;
 
-        let mut prev_element: Option<&Element> = None;
-        
-        for element in elements {
+        for (i, element) in elements.iter_mut().enumerate() {
+            // Position the element at current reserved_height
             self.position(text_system, element, zoom, element_padding)?;
             
-            // Determine if we should skip padding between elements
-            let skip_padding = if let Some(prev) = prev_element {
-                // Check if previous element was a header
-                // and current element is a table without caption
-                matches!(prev, Element::TextBox(text_box) if text_box.is_header)
-                    && matches!(&element.inner, Element::Table(table) 
+            // Update reserved_height to bottom of this element
+            let element_bounds = element
+                .bounds
+                .as_ref()
+                .context("Element didn't have bounds")?;
+            
+            self.reserved_height = element_bounds.pos.1 + element_bounds.size.1;
+            
+            // Check if we should skip padding after this element
+            // Skip if this is a header followed by a table without caption
+            let skip_padding = if matches!(&element.inner, Element::TextBox(text_box) if text_box.is_header) {
+                // This is a header - check if next element is a table without caption
+                if let Some(next_element) = elements.get(i + 1) {
+                    matches!(&next_element.inner, Element::Table(table)
                         if table.caption.as_ref()
                             .map(|c| c.texts.is_empty() || c.texts.iter().all(|t| t.text.trim().is_empty()))
                             .unwrap_or(true))
+                } else {
+                    false
+                }
             } else {
                 false
             };
             
-            // Only add padding if we're not skipping it
-            let padding_to_add = if skip_padding { 
-                0.0 
-            } else { 
-                element_padding * self.hidpi_scale * zoom 
-            };
-            
-            self.reserved_height += padding_to_add
-                + element
-                    .bounds
-                    .as_ref()
-                    .context("Element didn't have bounds")?
-                    .size
-                    .1;
-                    
-            prev_element = Some(&element.inner);
+            // Add padding after element unless we're skipping it
+            if !skip_padding {
+                self.reserved_height += element_padding * self.hidpi_scale * zoom;
+            }
         }
 
         Ok(())
