@@ -398,7 +398,32 @@ impl Inlyne {
     ) {
         let positioning_start = Instant::now();
 
-        for element in element_queue.lock().drain(..) {
+        let mut element_vec: Vec<Element> = element_queue.lock().drain(..).collect();
+        
+        // First pass: identify indices where we should skip padding
+        let mut skip_padding_indices = Vec::new();
+        for (i, element) in element_vec.iter().enumerate() {
+            // Check if current element is a header followed by a table without caption
+            if let Element::TextBox(ref tb) = element {
+                // Check if this is a header (has anchor)
+                if tb.is_anchor.is_some() && i + 1 < element_vec.len() {
+                    // Check if next element is a table without caption
+                    if let Element::Table(ref next_table) = element_vec[i + 1] {
+                        // Check if table has no caption or empty caption
+                        let has_no_caption = next_table.caption.as_ref()
+                            .map(|c| c.texts.is_empty() || c.texts.iter().all(|t| t.text.trim().is_empty()))
+                            .unwrap_or(true);
+                        
+                        if has_no_caption {
+                            skip_padding_indices.push(i);
+                        }
+                    }
+                }
+            }
+        }
+        
+        // Second pass: position elements
+        for (i, element) in element_vec.drain(..).enumerate() {
             // Position element and add it to elements
             let mut positioned_element = Positioned::new(element);
             renderer
@@ -410,9 +435,17 @@ impl Inlyne {
                     renderer.element_padding,
                 )
                 .unwrap();
+            
+            // Add element height to reserved height
             renderer.positioner.reserved_height +=
-                renderer.element_padding * renderer.hidpi_scale * renderer.zoom
-                    + positioned_element.bounds.as_ref().unwrap().size.1;
+                positioned_element.bounds.as_ref().unwrap().size.1;
+            
+            // Add padding after element UNLESS it's a header followed by table without caption
+            if !skip_padding_indices.contains(&i) {
+                renderer.positioner.reserved_height +=
+                    renderer.element_padding * renderer.hidpi_scale * renderer.zoom;
+            }
+            
             elements.push(positioned_element);
         }
 
