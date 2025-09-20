@@ -398,126 +398,110 @@ impl Inlyne {
     ) {
         let positioning_start = Instant::now();
 
-        let elements_vec: Vec<Element> = element_queue.lock().drain(..).collect();
+        let mut elements_vec: Vec<Element> = element_queue.lock().drain(..).collect();
         
-        // Process elements one by one
-        for (idx, element) in elements_vec.into_iter().enumerate() {
-            // Check if this is a table without caption following a header
-            let mut bypass_positioner = false;
-            let mut manual_position = (0.0, 0.0);
-            let mut manual_size = (0.0, 0.0);
+        // FIRST: Remove ALL elements between headers and tables without captions
+        let mut elements_to_remove = Vec::new();
+        
+        for i in 0..elements_vec.len() {
+            // Find headers
+            if let Element::TextBox(ref tb) = elements_vec[i] {
+                if tb.is_anchor.is_some() {
+                    // Found a header, look for next table
+                    let mut found_table_without_caption = false;
+                    let mut table_idx = 0;
+                    
+                    for j in (i + 1)..elements_vec.len() {
+                        match &elements_vec[j] {
+                            Element::Table(table) => {
+                                let has_caption = table.caption.as_ref()
+                                    .map(|c| !c.texts.is_empty() && c.texts.iter().any(|t| !t.text.trim().is_empty()))
+                                    .unwrap_or(false);
+                                
+                                if !has_caption {
+                                    found_table_without_caption = true;
+                                    table_idx = j;
+                                }
+                                break;
+                            }
+                            _ => continue,
+                        }
+                    }
+                    
+                    // If we found a table without caption, mark ALL elements between for removal
+                    if found_table_without_caption {
+                        for k in (i + 1)..table_idx {
+                            elements_to_remove.push(k);
+                            tracing::warn!("Removing element {} between header {} and table {}", k, i, table_idx);
+                        }
+                    }
+                }
+            }
+        }
+        
+        // Actually remove the elements (in reverse order to maintain indices)
+        for &idx in elements_to_remove.iter().rev() {
+            elements_vec.remove(idx);
+        }
+        
+        tracing::info!("Removed {} elements between headers and tables", elements_to_remove.len());
+        
+        // SECOND: Position remaining elements normally
+        let mut last_was_header_without_caption_table = false;
+        
+        for element in elements_vec {
+            let mut positioned_element = Positioned::new(element);
             
-            if let Element::Table(ref table) = element {
+            // Check if this is a table without caption that follows a header
+            let mut is_table_after_header = false;
+            if let Element::Table(ref table) = positioned_element.inner {
                 let has_caption = table.caption.as_ref()
                     .map(|c| !c.texts.is_empty() && c.texts.iter().any(|t| !t.text.trim().is_empty()))
                     .unwrap_or(false);
                 
-                if !has_caption && elements.len() > 0 {
-                    // Look back for a header (ignoring spacers)
-                    for j in (0..elements.len()).rev() {
-                        match &elements[j].inner {
-                            Element::TextBox(tb) if tb.is_anchor.is_some() => {
-                                // Found header - bypass positioner entirely
-                                let header_bounds = elements[j].bounds.as_ref().unwrap();
-                                // Position table EXACTLY at header bottom with zero gap
-                                manual_position = (header_bounds.pos.0, header_bounds.pos.1 + header_bounds.size.1);
-                                
-                                // Calculate table size manually (approximate)
-                                let page_width = 700.0;
-                                let page_margin = 50.0;
-                                manual_size = (page_width - 2.0 * page_margin, 100.0); // Will be adjusted
-                                
-                                bypass_positioner = true;
-                                tracing::info!("BYPASSING positioner for table at idx {} - manual position y={:.2}", idx, manual_position.1);
-                                break;
-                            }
-                            Element::Spacer(_) => continue, // Skip spacers
-                            _ => break, // Stop at any other element
-                        }
-                    }
+                if !has_caption && last_was_header_without_caption_table {
+                    is_table_after_header = true;
                 }
             }
             
-            // Handle spacers between headers and tables
-            let mut skip_this_element = false;
-            if let Element::Spacer(_) = element {
-                // Check if this spacer is between a header and table without caption
-                if elements.len() > 0 {
-                    let mut has_header_before = false;
-                    
-                    // Look back for header
-                    for j in (0..elements.len()).rev() {
-                        match &elements[j].inner {
-                            Element::TextBox(tb) if tb.is_anchor.is_some() => {
-                                has_header_before = true;
-                                break;
-                            }
-                            Element::Spacer(_) => continue,
-                            _ => break,
-                        }
-                    }
-                    
-                    // If we found a header, skip this spacer entirely
-                    if has_header_before {
-                        skip_this_element = true;
-                        tracing::info!("Skipping spacer at idx {} (between header and potential table)", idx);
-                    }
-                }
-            }
+            // Position the element
+            renderer
+                .positioner
+                .position(
+                    &mut renderer.text_system,
+                    &mut positioned_element,
+                    renderer.zoom,
+                    renderer.element_padding,
+                )
+                .unwrap();
             
-            if skip_this_element {
-                // Don't position or add this element at all
-                continue;
-            }
+            let element_height = positioned_element.bounds.as_ref().unwrap().size.1;
+            renderer.positioner.reserved_height += element_height;
             
-            // Create positioned element
-            let mut positioned_element = Positioned::new(element);
-            
-            if bypass_positioner {
-                // Manually set bounds, completely bypassing the positioner
-                // First, measure the table properly
-                if let Element::Table(ref table) = positioned_element.inner {
-                    let layout = table.layout(
-                        &mut renderer.text_system,
-                        &mut renderer.positioner.taffy,
-                        manual_size,
-                        renderer.zoom,
-                    ).unwrap();
-                    manual_size.1 = layout.size.1;
-                }
-                
-                // Set the bounds manually
-                positioned_element.bounds = Some(crate::utils::Rect::new(
-                    manual_position,
-                    manual_size,
-                ));
-                
-                // Update reserved height to exactly where the table ends
-                renderer.positioner.reserved_height = manual_position.1 + manual_size.1;
-                
-                // Add extra 6px padding after table without caption
-                renderer.positioner.reserved_height += 6.0 * renderer.hidpi_scale * renderer.zoom;
-                
-                tracing::info!("✓ BYPASSED positioner - table at EXACT position y={:.2}, height={:.2}", 
-                    manual_position.1, manual_size.1);
-            } else {
-                // Normal positioning
-                renderer
-                    .positioner
-                    .position(
-                        &mut renderer.text_system,
-                        &mut positioned_element,
-                        renderer.zoom,
-                        renderer.element_padding,
-                    )
-                    .unwrap();
-                
-                let element_height = positioned_element.bounds.as_ref().unwrap().size.1;
-                renderer.positioner.reserved_height += element_height;
-                
-                // Add padding after element
+            // Add padding - but not after headers that have tables following
+            if !last_was_header_without_caption_table {
                 let padding = renderer.element_padding * renderer.hidpi_scale * renderer.zoom;
                 renderer.positioner.reserved_height += padding;
+            } else {
+                tracing::info!("Skipped padding after header before table without caption");
+            }
+            
+            // Add extra padding after tables without captions
+            if is_table_after_header {
+                let extra_padding = 6.0 * renderer.hidpi_scale * renderer.zoom;
+                renderer.positioner.reserved_height += extra_padding;
+                tracing::info!("Added {:.2}px extra padding after table without caption", extra_padding);
+            }
+            
+            // Track if this was a header that will be followed by a table without caption
+            last_was_header_without_caption_table = false;
+            if let Element::TextBox(ref tb) = positioned_element.inner {
+                if tb.is_anchor.is_some() {
+                    // This is a header, check if it's followed by a table without caption
+                    // Since we removed elements between, the next element (if table without caption) 
+                    // will be right after
+                    last_was_header_without_caption_table = true;
+                }
             }
             
             elements.push(positioned_element);
