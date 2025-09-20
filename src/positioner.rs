@@ -225,12 +225,12 @@ impl Positioner {
     ) -> anyhow::Result<()> {
         self.reserved_height = element_padding * self.hidpi_scale * zoom;
 
-        for (i, element) in elements.iter_mut().enumerate() {
+        for i in 0..elements.len() {
             // Position the element at current reserved_height
-            self.position(text_system, element, zoom, element_padding)?;
+            self.position(text_system, &mut elements[i], zoom, element_padding)?;
             
             // Update reserved_height to bottom of this element
-            let element_bounds = element
+            let element_bounds = elements[i]
                 .bounds
                 .as_ref()
                 .context("Element didn't have bounds")?;
@@ -239,10 +239,10 @@ impl Positioner {
             
             // Check if we should skip padding after this element
             // Skip if this is a header followed by a table without caption
-            let skip_padding = if matches!(&element.inner, Element::TextBox(text_box) if text_box.is_header) {
+            let skip_padding = if matches!(&elements[i].inner, Element::TextBox(text_box) if text_box.is_header) {
                 // This is a header - check if next element is a table without caption
-                if let Some(next_element) = elements.get(i + 1) {
-                    matches!(&next_element.inner, Element::Table(table)
+                if i + 1 < elements.len() {
+                    matches!(&elements[i + 1].inner, Element::Table(table)
                         if table.caption.as_ref()
                             .map(|c| c.texts.is_empty() || c.texts.iter().all(|t| t.text.trim().is_empty()))
                             .unwrap_or(true))

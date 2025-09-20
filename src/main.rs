@@ -452,18 +452,6 @@ impl Inlyne {
         for element in elements_vec {
             let mut positioned_element = Positioned::new(element);
             
-            // Check if this is a table without caption that follows a header
-            let mut is_table_after_header = false;
-            if let Element::Table(ref table) = positioned_element.inner {
-                let has_caption = table.caption.as_ref()
-                    .map(|c| !c.texts.is_empty() && c.texts.iter().any(|t| !t.text.trim().is_empty()))
-                    .unwrap_or(false);
-                
-                if !has_caption && last_was_header_without_caption_table {
-                    is_table_after_header = true;
-                }
-            }
-            
             // Position the element
             renderer
                 .positioner
