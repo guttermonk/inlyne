@@ -400,73 +400,9 @@ impl Inlyne {
 
         let elements_vec: Vec<Element> = element_queue.lock().drain(..).collect();
         
-        // First pass: identify spacers and elements that need special handling
-        let mut zero_height_indices = Vec::new();
-        let mut skip_padding_indices = Vec::new();
-        
-        for i in 0..elements_vec.len() {
-            // Check for spacers between headers and tables without captions
-            if let Element::Spacer(_) = &elements_vec[i] {
-                // Look back for a header
-                let mut found_header = false;
-                for j in (0..i).rev() {
-                    match &elements_vec[j] {
-                        Element::TextBox(tb) if tb.is_anchor.is_some() => {
-                            found_header = true;
-                            break;
-                        }
-                        Element::Spacer(_) => continue,
-                        _ => break,
-                    }
-                }
-                
-                if found_header {
-                    // Look forward for a table
-                    for j in (i + 1)..elements_vec.len() {
-                        match &elements_vec[j] {
-                            Element::Table(table) => {
-                                let has_caption = table.caption.as_ref()
-                                    .map(|c| !c.texts.is_empty() && c.texts.iter().any(|t| !t.text.trim().is_empty()))
-                                    .unwrap_or(false);
-                                if !has_caption {
-                                    zero_height_indices.push(i);
-                                    tracing::info!("Will zero spacer at [{}] between header and table without caption", i);
-                                }
-                                break;
-                            }
-                            Element::Spacer(_) => continue,
-                            _ => break,
-                        }
-                    }
-                }
-            }
-            
-            // Check for headers followed by tables without captions
-            if let Element::TextBox(tb) = &elements_vec[i] {
-                if tb.is_anchor.is_some() {
-                    // Find the next non-spacer element
-                    for j in (i + 1)..elements_vec.len() {
-                        match &elements_vec[j] {
-                            Element::Table(table) => {
-                                let has_caption = table.caption.as_ref()
-                                    .map(|c| !c.texts.is_empty() && c.texts.iter().any(|t| !t.text.trim().is_empty()))
-                                    .unwrap_or(false);
-                                if !has_caption {
-                                    skip_padding_indices.push(i);
-                                }
-                                break;
-                            }
-                            Element::Spacer(_) => continue,
-                            _ => break,
-                        }
-                    }
-                }
-            }
-        }
-        
-        // Second pass: position elements with adjustments
+        // Process all elements
         for (i, element) in elements_vec.into_iter().enumerate() {
-            // Position element
+            // Position element normally first
             let mut positioned_element = Positioned::new(element);
             renderer
                 .positioner
@@ -478,67 +414,87 @@ impl Inlyne {
                 )
                 .unwrap();
             
-            // Get element height (zeroing spacers if needed)
-            let mut element_height = positioned_element.bounds.as_ref().unwrap().size.1;
-            let mut height_adjustment = 0.0;
+            let element_height = positioned_element.bounds.as_ref().unwrap().size.1;
+            let mut add_normal_padding = true;
             
-            if zero_height_indices.contains(&i) {
-                // This is a spacer between header and table without caption - zero it out
-                height_adjustment = element_height;
-                positioned_element.bounds.as_mut().unwrap().size.1 = 0.0;
-                tracing::info!("Zeroed spacer at [{}]: was {:.2}px, now 0px", i, element_height);
-                element_height = 0.0;
+            // Check if this is a table that should be flush with a header
+            if let Element::Table(ref table) = positioned_element.inner {
+                let has_caption = table.caption.as_ref()
+                    .map(|c| !c.texts.is_empty() && c.texts.iter().any(|t| !t.text.trim().is_empty()))
+                    .unwrap_or(false);
+                
+                if !has_caption {
+                    // Look back for a header (skipping spacers and empty elements)
+                    let mut header_bottom = None;
+                    for j in (0..elements.len()).rev() {
+                        match &elements[j].inner {
+                            Element::TextBox(tb) if tb.is_anchor.is_some() => {
+                                // Found a header - get its bottom position
+                                let header_bounds = elements[j].bounds.as_ref().unwrap();
+                                header_bottom = Some(header_bounds.pos.1 + header_bounds.size.1);
+                                break;
+                            }
+                            Element::Spacer(_) => continue, // Skip spacers
+                            Element::TextBox(tb) if tb.texts.is_empty() => continue, // Skip empty text boxes
+                            _ => break, // Stop at any other element
+                        }
+                    }
+                    
+                    if let Some(bottom) = header_bottom {
+                        // Move table to be flush with header
+                        let old_pos = positioned_element.bounds.as_ref().unwrap().pos.1;
+                        positioned_element.bounds.as_mut().unwrap().pos.1 = bottom;
+                        let new_pos = positioned_element.bounds.as_ref().unwrap().pos.1;
+                        
+                        // Adjust reserved height to match
+                        renderer.positioner.reserved_height = bottom + element_height;
+                        
+                        tracing::info!("✓ Moved table FLUSH with header: y={:.2} → y={:.2} (gap eliminated)", 
+                            old_pos, new_pos);
+                        
+                        // Add extra 6px padding after tables without captions
+                        let extra_padding = 6.0 * renderer.hidpi_scale * renderer.zoom;
+                        renderer.positioner.reserved_height += extra_padding;
+                        tracing::info!("Added {:.2}px extra padding after table without caption", extra_padding);
+                        
+                        add_normal_padding = false; // We'll handle padding specially
+                    }
+                }
             }
             
-            // Check if this is a table that needs position adjustment due to zeroed spacers
-            if matches!(positioned_element.inner, Element::Table(_)) {
-                // Look back for zeroed spacers
-                let mut total_adjustment = 0.0;
-                for j in (0..i).rev() {
-                    if zero_height_indices.contains(&j) {
-                        // This spacer was zeroed, add its original height to adjustment
-                        // We need to look at what the spacer's height would have been
-                        total_adjustment += 5.0 * renderer.hidpi_scale * renderer.zoom; // Default spacer height
-                    }
-                    // Stop if we hit a non-spacer that isn't a header
-                    match &elements.get(j).map(|e| &e.inner) {
-                        Some(Element::Spacer(_)) => continue,
-                        Some(Element::TextBox(tb)) if tb.is_anchor.is_some() => continue,
+            // Check if this is a spacer between a header and table without caption
+            let mut skip_spacer = false;
+            if let Element::Spacer(_) = positioned_element.inner {
+                // Check if there's a header before and table without caption after
+                let mut has_header_before = false;
+                for j in (0..elements.len()).rev() {
+                    match &elements[j].inner {
+                        Element::TextBox(tb) if tb.is_anchor.is_some() => {
+                            has_header_before = true;
+                            break;
+                        }
+                        Element::Spacer(_) => continue,
                         _ => break,
                     }
                 }
                 
-                if total_adjustment > 0.0 {
-                    let old_pos = positioned_element.bounds.as_ref().unwrap().pos.1;
-                    positioned_element.bounds.as_mut().unwrap().pos.1 -= total_adjustment;
-                    let new_pos = positioned_element.bounds.as_ref().unwrap().pos.1;
-                    tracing::info!("Adjusted table position up by {:.2}px: y={:.2} → y={:.2}", 
-                        total_adjustment, old_pos, new_pos);
+                if has_header_before {
+                    // Don't add height for this spacer
+                    skip_spacer = true;
+                    positioned_element.bounds.as_mut().unwrap().size.1 = 0.0;
+                    tracing::info!("Zeroed spacer between header and table");
                 }
             }
             
-            // Add element height to reserved height
-            renderer.positioner.reserved_height += element_height;
+            // Update reserved height
+            if !skip_spacer {
+                renderer.positioner.reserved_height += element_height;
+            }
             
-            // Add padding after element unless it should be skipped
-            if !skip_padding_indices.contains(&i) {
+            // Add padding if appropriate
+            if add_normal_padding {
                 let padding = renderer.element_padding * renderer.hidpi_scale * renderer.zoom;
                 renderer.positioner.reserved_height += padding;
-                
-                // Add extra 2px padding after tables without captions
-                if let Element::Table(ref table) = positioned_element.inner {
-                    let has_caption = table.caption.as_ref()
-                        .map(|c| !c.texts.is_empty() && c.texts.iter().any(|t| !t.text.trim().is_empty()))
-                        .unwrap_or(false);
-                    
-                    if !has_caption {
-                        let extra_padding = 2.0 * renderer.hidpi_scale * renderer.zoom;
-                        renderer.positioner.reserved_height += extra_padding;
-                        tracing::info!("Added {:.2}px extra padding after table without caption at [{}]", extra_padding, i);
-                    }
-                }
-            } else {
-                tracing::info!("✓ Skipped padding after header at [{}] (followed by table without caption)", i);
             }
             
             elements.push(positioned_element);
