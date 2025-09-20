@@ -447,9 +447,37 @@ impl Inlyne {
         tracing::info!("Removed {} elements between headers and tables", elements_to_remove.len());
         
         // SECOND: Position remaining elements normally
-        // Convert to indexed iteration to look ahead
-        for i in 0..elements_vec.len() {
-            let mut positioned_element = Positioned::new(elements_vec[i].clone());
+        // We need to check ahead before consuming elements, so we'll iterate while checking first
+        while !elements_vec.is_empty() {
+            // Check if current element is a header followed by a table without caption
+            let is_header_before_table = if elements_vec.len() >= 2 {
+                if let Element::TextBox(ref tb) = elements_vec[0] {
+                    if tb.is_header {
+                        // Check if next element is a table without caption
+                        if let Element::Table(ref table) = elements_vec[1] {
+                            let no_caption = table.caption.as_ref()
+                                .map(|c| c.texts.is_empty() || c.texts.iter().all(|t| t.text.trim().is_empty()))
+                                .unwrap_or(true);
+                            if no_caption {
+                                tracing::warn!(">>> HEADER BEFORE TABLE WITHOUT CAPTION DETECTED! <<<");
+                            }
+                            no_caption
+                        } else {
+                            false
+                        }
+                    } else {
+                        false
+                    }
+                } else {
+                    false
+                }
+            } else {
+                false
+            };
+            
+            // Now remove and position the element
+            let element = elements_vec.remove(0);
+            let mut positioned_element = Positioned::new(element);
             
             // Log element type and current reserved_height
             let element_type = match &positioned_element.inner {
@@ -463,30 +491,8 @@ impl Inlyne {
             };
             
             let reserved_before = renderer.positioner.reserved_height;
-            tracing::info!("Positioning element {} ({}). Reserved height BEFORE: {:.2}px", 
-                         i, element_type, reserved_before);
-            
-            // Check if current element is a header followed by a table without caption
-            let is_header_before_table = if let Element::TextBox(ref tb) = positioned_element.inner {
-                if tb.is_header && i + 1 < elements_vec.len() {
-                    // Check if next element is a table without caption
-                    if let Element::Table(ref table) = elements_vec[i + 1] {
-                        let no_caption = table.caption.as_ref()
-                            .map(|c| c.texts.is_empty() || c.texts.iter().all(|t| t.text.trim().is_empty()))
-                            .unwrap_or(true);
-                        if no_caption {
-                            tracing::warn!(">>> HEADER BEFORE TABLE WITHOUT CAPTION DETECTED! <<<");
-                        }
-                        no_caption
-                    } else {
-                        false
-                    }
-                } else {
-                    false
-                }
-            } else {
-                false
-            };
+            tracing::info!("Positioning element ({}). Reserved height BEFORE: {:.2}px", 
+                         element_type, reserved_before);
             
             // Position the element
             renderer
