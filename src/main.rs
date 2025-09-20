@@ -400,6 +400,17 @@ impl Inlyne {
 
         let elements_vec: Vec<Element> = element_queue.lock().drain(..).collect();
         
+        // Quick check: are there any spacers between headers and tables?
+        for i in 0..elements_vec.len().saturating_sub(1) {
+            if let (Element::TextBox(tb), Element::Spacer(_)) = (&elements_vec[i], &elements_vec[i + 1]) {
+                if tb.is_anchor.is_some() && i + 2 < elements_vec.len() {
+                    if matches!(&elements_vec[i + 2], Element::Table(_)) {
+                        tracing::warn!("SPACER found between header and table!");
+                    }
+                }
+            }
+        }
+        
         // Process all elements
         for element in elements_vec.into_iter() {
             // Check if this is a header followed by a table without caption
@@ -439,10 +450,14 @@ impl Inlyne {
                             // Header followed by table without caption - remove the padding
                             // that was added after the header
                             let padding_to_remove = renderer.element_padding * renderer.hidpi_scale * renderer.zoom;
+                            let old_pos = positioned_element.bounds.as_ref().unwrap().pos.1;
                             renderer.positioner.reserved_height -= padding_to_remove;
-                            
-                            // Also need to adjust the current table's position
                             positioned_element.bounds.as_mut().unwrap().pos.1 -= padding_to_remove;
+                            let new_pos = positioned_element.bounds.as_ref().unwrap().pos.1;
+                            tracing::info!("✓ REMOVED {:.2}px padding: header→table (no caption). Table moved from y={:.2} to y={:.2}", 
+                                padding_to_remove, old_pos, new_pos);
+                        } else {
+                            tracing::info!("✗ KEPT padding: header→table (has caption)");
                         }
                     }
                 }

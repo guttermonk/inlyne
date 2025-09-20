@@ -1077,6 +1077,51 @@ Line
 ";
 
 #[test]
+fn simple_header_table_element_check() {
+    log::init();
+    
+    let md = "## Header\n\n| Col1 | Col2 |\n|------|------|\n| A    | B    |";
+    
+    // Use default test interpreter settings
+    let elems = interpret_md(md);
+    
+    println!("\n=== Simple Header-Table Elements ===");
+    for (i, elem) in elems.iter().enumerate() {
+        match elem {
+            Element::Spacer(_) => println!("  [{}] Spacer", i),
+            Element::TextBox(tb) if tb.is_anchor.is_some() => println!("  [{}] Header", i),
+            Element::TextBox(_) => println!("  [{}] TextBox", i),
+            Element::Table(_) => println!("  [{}] Table", i),
+            _ => println!("  [{}] Other", i),
+        }
+    }
+    
+    // Count spacers between header and table
+    let mut header_idx = None;
+    let mut table_idx = None;
+    let mut spacer_count = 0;
+    
+    for (i, elem) in elems.iter().enumerate() {
+        if let Element::TextBox(tb) = elem {
+            if tb.is_anchor.is_some() && header_idx.is_none() {
+                header_idx = Some(i);
+            }
+        } else if matches!(elem, Element::Table(_)) && table_idx.is_none() {
+            table_idx = Some(i);
+        }
+    }
+    
+    if let (Some(h), Some(t)) = (header_idx, table_idx) {
+        for i in (h + 1)..t {
+            if matches!(elems[i], Element::Spacer(_)) {
+                spacer_count += 1;
+            }
+        }
+        println!("Spacers between header and table: {}", spacer_count);
+    }
+}
+
+#[test]
 fn spacers_in_collapsed_section() {
     log::init();
 
