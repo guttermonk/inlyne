@@ -224,8 +224,23 @@ impl Positioner {
         element_padding: f32,
     ) -> anyhow::Result<()> {
         self.reserved_height = element_padding * self.hidpi_scale * zoom;
+        let mut last_element_bottom: Option<f32> = None;
 
         for i in 0..elements.len() {
+            // Ensure minimum 6px spacing before headers (except at document start)
+            if matches!(&elements[i].inner, Element::TextBox(tb) if tb.is_header) {
+                if let Some(last_bottom) = last_element_bottom {
+                    // Ensure at least 6px gap from previous element to this header
+                    let min_spacing = 6.0 * self.hidpi_scale * zoom;
+                    let current_gap = self.reserved_height - last_bottom;
+                    
+                    if current_gap < min_spacing {
+                        // Add extra spacing to reach minimum
+                        self.reserved_height = last_bottom + min_spacing;
+                    }
+                }
+            }
+            
             // Position the element at current reserved_height
             self.position(text_system, &mut elements[i], zoom, element_padding)?;
             
@@ -235,27 +250,41 @@ impl Positioner {
                 .as_ref()
                 .context("Element didn't have bounds")?;
             
-            self.reserved_height = element_bounds.pos.1 + element_bounds.size.1;
+            let element_bottom = element_bounds.pos.1 + element_bounds.size.1;
+            self.reserved_height = element_bottom;
+            last_element_bottom = Some(element_bottom);
             
-            // Check if we should skip padding after this element
-            // Skip if this is a header followed by a table without caption
-            let skip_padding = if matches!(&elements[i].inner, Element::TextBox(text_box) if text_box.is_header) {
-                // This is a header - check if next element is a table without caption
+            // Determine padding based on element type and what follows
+            let padding = if matches!(&elements[i].inner, Element::TextBox(text_box) if text_box.is_header) {
+                // Check if header is followed by table without caption
                 if i + 1 < elements.len() {
-                    matches!(&elements[i + 1].inner, Element::Table(table)
+                    if matches!(&elements[i + 1].inner, Element::Table(table)
                         if table.caption.as_ref()
                             .map(|c| c.texts.is_empty() || c.texts.iter().all(|t| t.text.trim().is_empty()))
-                            .unwrap_or(true))
+                            .unwrap_or(true)) {
+                        // Skip padding after header before table without caption
+                        0.0
+                    } else {
+                        // Normal padding after header
+                        element_padding * self.hidpi_scale * zoom
+                    }
                 } else {
-                    false
+                    // Normal padding after header
+                    element_padding * self.hidpi_scale * zoom
                 }
+            } else if matches!(&elements[i].inner, Element::Table(_)) {
+                // Tables always get at least 6px padding for consistency
+                let min_table_padding = 6.0 * self.hidpi_scale * zoom;
+                let normal_padding = element_padding * self.hidpi_scale * zoom;
+                normal_padding.max(min_table_padding)
             } else {
-                false
+                // Normal padding for other elements
+                element_padding * self.hidpi_scale * zoom
             };
             
-            // Add padding after element unless we're skipping it
-            if !skip_padding {
-                self.reserved_height += element_padding * self.hidpi_scale * zoom;
+            // Add the calculated padding
+            if padding > 0.0 {
+                self.reserved_height += padding;
             }
         }
 

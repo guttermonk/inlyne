@@ -494,6 +494,19 @@ impl Inlyne {
             tracing::info!("Positioning element ({}). Reserved height BEFORE: {:.2}px", 
                          element_type, reserved_before);
             
+            // Ensure minimum 6px spacing before headers (except at document start)
+            if matches!(&positioned_element.inner, Element::TextBox(tb) if tb.is_header) {
+                if renderer.positioner.reserved_height > renderer.element_padding * renderer.hidpi_scale {
+                    // Not at document start, ensure minimum spacing
+                    let min_spacing = 6.0 * renderer.hidpi_scale * renderer.zoom;
+                    let last_element_bottom = renderer.positioner.reserved_height;
+                    
+                    // Add spacing to ensure header has breathing room
+                    renderer.positioner.reserved_height = last_element_bottom + min_spacing;
+                    tracing::info!("  Ensured {:.2}px minimum spacing before header", min_spacing);
+                }
+            }
+            
             // Position the element
             renderer
                 .positioner
@@ -514,16 +527,27 @@ impl Inlyne {
             
             renderer.positioner.reserved_height += element_height;
             
-            // Add padding after element UNLESS it's a header before a table without caption
-            if !is_header_before_table {
-                let padding = renderer.element_padding * renderer.hidpi_scale * renderer.zoom;
+            // Determine padding based on element type and what follows
+            let padding = if is_header_before_table {
+                // Skip padding after header when followed by table without caption
+                tracing::warn!("  >>> SKIPPED PADDING after header before table! <<<");
+                0.0
+            } else if matches!(&positioned_element.inner, Element::Table(_)) {
+                // Tables always get at least 6px padding for consistency
+                let min_table_padding = 6.0 * renderer.hidpi_scale * renderer.zoom;
+                let normal_padding = renderer.element_padding * renderer.hidpi_scale * renderer.zoom;
+                let padding = normal_padding.max(min_table_padding);
+                tracing::info!("  Table gets {:.2}px padding after it", padding);
+                padding
+            } else {
+                // Normal padding for other elements
+                renderer.element_padding * renderer.hidpi_scale * renderer.zoom
+            };
+            
+            if padding > 0.0 {
                 renderer.positioner.reserved_height += padding;
                 tracing::info!("  Added padding: {:.2}px. New reserved height: {:.2}px", 
                             padding, renderer.positioner.reserved_height);
-            } else {
-                tracing::warn!("  >>> SKIPPED PADDING after header! Reserved height: {:.2}px <<<", 
-                            renderer.positioner.reserved_height);
-                tracing::warn!("  >>> Gap between header bottom and next element will be: 0.00px <<<");
             }
             
             elements.push(positioned_element);
