@@ -577,9 +577,9 @@ impl Renderer {
     fn prepare_search_ui(
         &mut self,
         search_active: bool,
-        search_query: &str,
-        current_match: Option<usize>,
-        total_matches: usize,
+        _search_query: &str,
+        _current_match: Option<usize>,
+        _total_matches: usize,
     ) {
         if !search_active {
             return;
@@ -587,6 +587,10 @@ impl Renderer {
 
         let screen_size = self.screen_size();
         let search_bar_height = 40.0 * self.hidpi_scale;
+        
+        // TODO: Render search text and match counter
+        // This would require text rendering capabilities similar to TextBox
+        // For now, we just show the search bar background
         
         // Prepare search bar background rectangle
         let search_bar_rect = Rect::new(
