@@ -228,7 +228,7 @@ impl Renderer {
     fn draw_search_highlights(
         &mut self,
         elements: &[Positioned<Element>],
-        search_matches: &[(usize, usize)],
+        search_matches: &[(usize, usize, usize)],
         current_match: Option<usize>,
         search_query: &str,
     ) -> anyhow::Result<()> {
@@ -243,11 +243,9 @@ impl Renderer {
             match &element.inner {
                 Element::TextBox(_) => {
                     // Check if this element index has any matches
-                    for (match_idx, &(match_elem_idx, _text_idx)) in search_matches.iter().enumerate() {
+                    for (match_idx, &(match_elem_idx, _text_idx, char_offset)) in search_matches.iter().enumerate() {
                         if match_elem_idx == elem_idx {
-                            // Draw highlight for this match
-                            // TODO: Calculate exact text position within TextBox to highlight only the matching word
-                            // For now, highlight the whole text element but with reduced width estimate
+                            // Draw highlight for this match at the correct position
                             if let Some(bounds) = &element.bounds {
                                 let is_current = current_match == Some(match_idx);
                                 let highlight_color = if is_current {
@@ -256,9 +254,12 @@ impl Renderer {
                                     [1.0, 0.8, 0.0, 0.3] // Yellow/orange for other matches
                                 };
                                 
-                                // Draw highlight rectangle for estimated text width
+                                // Calculate horizontal offset based on character position
+                                let x_offset = char_offset as f32 * char_width;
+                                
+                                // Draw highlight rectangle at the correct position
                                 let highlight_rect = Rect::new(
-                                    (bounds.pos.0, bounds.pos.1 - self.scroll_y),
+                                    (bounds.pos.0 + x_offset, bounds.pos.1 - self.scroll_y),
                                     (estimated_match_width, bounds.size.1),
                                 );
                                 self.draw_rectangle(highlight_rect, highlight_color)?;
@@ -272,7 +273,7 @@ impl Renderer {
                     for sub_element in section.elements.iter() {
                         if let Element::TextBox(_) = &sub_element.inner {
                             // Check if this element index has any matches
-                            for (match_idx, &(match_elem_idx, _text_idx)) in search_matches.iter().enumerate() {
+                            for (match_idx, &(match_elem_idx, _text_idx, char_offset)) in search_matches.iter().enumerate() {
                                 if match_elem_idx == elem_idx {
                                     // Draw highlight for this match
                                     if let Some(bounds) = &sub_element.bounds {
@@ -283,9 +284,53 @@ impl Renderer {
                                             [1.0, 0.8, 0.0, 0.3] // Yellow/orange for other matches
                                         };
                                         
-                                        // Draw highlight rectangle
+                                        // Calculate horizontal offset based on character position
+                                        let x_offset = char_offset as f32 * char_width;
+                                        
+                                        // Draw highlight rectangle at the correct position
                                         let highlight_rect = Rect::new(
-                                            (bounds.pos.0, bounds.pos.1 - self.scroll_y),
+                                            (bounds.pos.0 + x_offset, bounds.pos.1 - self.scroll_y),
+                                            (estimated_match_width, bounds.size.1),
+                                        );
+                                        self.draw_rectangle(highlight_rect, highlight_color)?;
+                                    }
+                                }
+                            }
+                            elem_idx += 1;
+                        }
+                    }
+                }
+                Element::Table(table) => {
+                    // Count TextBox elements in table cells for proper indexing
+                    // Note: We can't highlight within tables yet as we don't have cell bounds here
+                    for row in &table.rows {
+                        for _text_box in row {
+                            elem_idx += 1;
+                        }
+                    }
+                }
+                Element::Row(row) => {
+                    // Handle standalone rows (Row elements contain Positioned<Element>)
+                    for cell in &row.elements {
+                        if let Element::TextBox(_) = &cell.inner {
+                            // Check if this element index has any matches
+                            for (match_idx, &(match_elem_idx, _text_idx, char_offset)) in search_matches.iter().enumerate() {
+                                if match_elem_idx == elem_idx {
+                                    // Draw highlight for this match
+                                    if let Some(bounds) = &cell.bounds {
+                                        let is_current = current_match == Some(match_idx);
+                                        let highlight_color = if is_current {
+                                            [0.0, 1.0, 0.0, 0.4] // Bright green for current match
+                                        } else {
+                                            [1.0, 0.8, 0.0, 0.3] // Yellow/orange for other matches
+                                        };
+                                        
+                                        // Calculate horizontal offset based on character position
+                                        let x_offset = char_offset as f32 * char_width;
+                                        
+                                        // Draw highlight rectangle at the correct position
+                                        let highlight_rect = Rect::new(
+                                            (bounds.pos.0 + x_offset, bounds.pos.1 - self.scroll_y),
                                             (estimated_match_width, bounds.size.1),
                                         );
                                         self.draw_rectangle(highlight_rect, highlight_color)?;
@@ -936,7 +981,7 @@ impl Renderer {
         elements: &mut [Positioned<Element>],
         selection: &mut Selection,
         search_active: bool,
-        search_matches: &[(usize, usize)],
+        search_matches: &[(usize, usize, usize)],
         current_match: Option<usize>,
         search_query: &str,
         total_matches: usize,

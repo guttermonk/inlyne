@@ -159,7 +159,7 @@ pub struct Inlyne {
     // Search state
     search_active: bool,
     search_query: String,
-    search_matches: Vec<(usize, usize)>, // (element_index, text_index) - TODO: add character offset for precise highlighting
+    search_matches: Vec<(usize, usize, usize)>, // (element_index, text_index, char_offset)
     current_match: Option<usize>,
     search_display_text: String,
 }
@@ -667,37 +667,51 @@ impl Inlyne {
         self.search_matches.clear();
         let query_lower = self.search_query.to_lowercase();
         
-        // Search through all elements and store match positions with character offsets
+        // Helper function to search text and add matches
+        let mut add_text_matches = |elem_idx: usize, text_box: &TextBox| {
+            for (text_idx, text) in text_box.texts.iter().enumerate() {
+                let text_lower = text.text.to_lowercase();
+                // Find all occurrences of the search query in this text segment
+                let mut start = 0;
+                while let Some(pos) = text_lower[start..].find(&query_lower) {
+                    let char_offset = start + pos;
+                    // Store element index, text index, and character offset
+                    self.search_matches.push((elem_idx, text_idx, char_offset));
+                    start = char_offset + query_lower.len();
+                }
+            }
+        };
+        
+        // Search through all elements recursively
         let mut elem_count = 0;
         for (_pos_idx, positioned_element) in self.elements.iter().enumerate() {
             match &positioned_element.inner {
                 Element::TextBox(text_box) => {
-                    for (text_idx, text) in text_box.texts.iter().enumerate() {
-                        let text_lower = text.text.to_lowercase();
-                        // Find all occurrences of the search query in this text segment
-                        let mut start = 0;
-                        while let Some(pos) = text_lower[start..].find(&query_lower) {
-                            let match_start = start + pos;
-                            // Store element index, text index, and character position
-                            self.search_matches.push((elem_count, text_idx));
-                            start = match_start + query_lower.len();
-                        }
-                    }
+                    add_text_matches(elem_count, text_box);
                     elem_count += 1;
                 }
                 Element::Section(section) => {
                     for sub_element in section.elements.iter() {
                         if let Element::TextBox(text_box) = &sub_element.inner {
-                            for (text_idx, text) in text_box.texts.iter().enumerate() {
-                                let text_lower = text.text.to_lowercase();
-                                // Find all occurrences of the search query in this text segment
-                                let mut start = 0;
-                                while let Some(pos) = text_lower[start..].find(&query_lower) {
-                                    let match_start = start + pos;
-                                    self.search_matches.push((elem_count, text_idx));
-                                    start = match_start + query_lower.len();
-                                }
-                            }
+                            add_text_matches(elem_count, text_box);
+                            elem_count += 1;
+                        }
+                    }
+                }
+                Element::Table(table) => {
+                    // Search through table rows and cells
+                    for row in &table.rows {
+                        for text_box in row {
+                            add_text_matches(elem_count, text_box);
+                            elem_count += 1;
+                        }
+                    }
+                }
+                Element::Row(row) => {
+                    // Handle standalone rows (shouldn't normally happen, but just in case)
+                    for cell_element in &row.elements {
+                        if let Element::TextBox(text_box) = &cell_element.inner {
+                            add_text_matches(elem_count, text_box);
                             elem_count += 1;
                         }
                     }
@@ -767,7 +781,7 @@ impl Inlyne {
 
     fn jump_to_current_match(&mut self) {
         if let Some(match_idx) = self.current_match {
-            if let Some(&(elem_idx, _)) = self.search_matches.get(match_idx) {
+            if let Some(&(elem_idx, _, _)) = self.search_matches.get(match_idx) {
                 // Find the element using the same indexing as search
                 let mut current_idx = 0;
                 let mut target_element = None;
@@ -786,6 +800,34 @@ impl Inlyne {
                                 if let Element::TextBox(_) = &sub_element.inner {
                                     if current_idx == elem_idx {
                                         target_element = Some(sub_element);
+                                        break;
+                                    }
+                                    current_idx += 1;
+                                }
+                            }
+                            if target_element.is_some() {
+                                break;
+                            }
+                        }
+                        Element::Table(table) => {
+                            // Search through table cells
+                            for row in &table.rows {
+                                for _text_box in row {
+                                    if current_idx == elem_idx {
+                                        // Can't return the TextBox directly since it's not a Positioned<Element>
+                                        // This is a limitation - table cells can't be jumped to directly
+                                        // TODO: Fix this by storing table cell positions separately
+                                        break;
+                                    }
+                                    current_idx += 1;
+                                }
+                            }
+                        }
+                        Element::Row(row) => {
+                            for cell in &row.elements {
+                                if let Element::TextBox(_) = &cell.inner {
+                                    if current_idx == elem_idx {
+                                        target_element = Some(cell);
                                         break;
                                     }
                                     current_idx += 1;
