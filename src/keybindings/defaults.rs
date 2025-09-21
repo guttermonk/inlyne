@@ -92,9 +92,7 @@ pub fn defaults() -> Vec<(Action, KeyCombo)> {
                 ModifiersState::SHIFT,
             )]),
         ),
-        // Search: f
-        (Action::Search, KeyCombo::from(VirtKey::F)),
-        // Search: Ctrl+F / Command+F
+        // Search: Ctrl+F / Command+F (removed plain 'f' to avoid conflicts with typing)
         (
             Action::Search,
             KeyCombo(vec![ModifiedKey(Key::from(VirtKey::F), ctrl_or_command)]),

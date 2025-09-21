@@ -167,6 +167,13 @@ pub struct Inlyne {
 impl Inlyne {
     pub fn new(opts: Opts) -> anyhow::Result<Self> {
         let keycombos = KeyCombos::new(opts.keybindings.clone())?;
+        
+        // Debug: Print registered keybindings for search navigation
+        println!("=== KEYBINDING DEBUG ===");
+        println!("Checking if NextMatch/PrevMatch actions are registered...");
+        // Note: KeyCombos internal structure would need to be exposed for full debugging
+        println!("KeyCombos initialized successfully");
+        println!("=== END KEYBINDING DEBUG ===");
 
         let file_path = opts.history.get_path().to_owned();
 
@@ -609,27 +616,40 @@ impl Inlyne {
             // Update window title to show search mode
             self.window.set_title(&format!("[SEARCH MODE] {}", self.search_display_text));
             
-            tracing::info!("Search activated - ready to receive input");
-            tracing::info!("Total elements available: {}", self.elements.len());
+            println!("=== SEARCH ACTIVATED ===");
+            println!("Search is now active. Press Ctrl+F to exit, Escape to cancel");
+            println!("After finding matches: 'n' or Enter for next, Shift+n for previous");
+            println!("=== SEARCH ACTIVATION DEBUG ===");
+            println!("Total positioned elements: {}", self.elements.len());
             
-            // Debug: Show first few TextBox contents
-            let mut text_box_count = 0;
-            for (idx, element) in self.elements.iter().take(5).enumerate() {
-                if let Element::TextBox(tb) = &element.inner {
-                    text_box_count += 1;
-                    tracing::info!("  Element[{}] TextBox has {} text segments", idx, tb.texts.len());
-                    for (t_idx, text) in tb.texts.iter().take(2).enumerate() {
-                        tracing::info!("    Text[{}]: '{}'", t_idx,
-                            if text.text.len() > 30 {
-                                format!("{}...", &text.text[..30])
+            // Print structure of all elements to understand layout
+            for (idx, element) in self.elements.iter().enumerate() {
+                match &element.inner {
+                    Element::TextBox(tb) => {
+                        println!("Element[{}]: TextBox with {} texts", idx, tb.texts.len());
+                        for (t_idx, text) in tb.texts.iter().enumerate() {
+                            println!("  Text[{}]: '{}'", t_idx, text.text);
+                        }
+                    }
+                    Element::Section(section) => {
+                        println!("Element[{}]: Section with {} sub-elements", idx, section.elements.len());
+                        for (s_idx, sub_elem) in section.elements.iter().enumerate() {
+                            if let Element::TextBox(tb) = &sub_elem.inner {
+                                println!("  SubElement[{}]: TextBox with {} texts", s_idx, tb.texts.len());
+                                for (t_idx, text) in tb.texts.iter().enumerate() {
+                                    println!("    Text[{}]: '{}'", t_idx, text.text);
+                                }
                             } else {
-                                text.text.clone()
+                                println!("  SubElement[{}]: {:?}", s_idx, std::mem::discriminant(&sub_elem.inner));
                             }
-                        );
+                        }
+                    }
+                    _ => {
+                        println!("Element[{}]: {:?}", idx, std::mem::discriminant(&element.inner));
                     }
                 }
             }
-            tracing::info!("Found {} TextBox elements in first 5 elements", text_box_count);
+            println!("=== END SEARCH ACTIVATION DEBUG ===");
         } else {
             tracing::info!("Search deactivated");
             self.search_display_text.clear();
@@ -658,17 +678,17 @@ impl Inlyne {
             return;
         }
         
-        tracing::debug!("Received character for search: {:?} (code: {})", c, c as u32);
+        println!("update_search_query: Received character '{:?}' (code: {})", c, c as u32);
         
         // Handle backspace
         if c == '\u{8}' {
             self.search_query.pop();
-            tracing::debug!("Backspace - search query now: '{}'", self.search_query);
+            println!("Backspace - search query now: '{}'", self.search_query);
         } else if !c.is_control() {
             self.search_query.push(c);
-            tracing::debug!("Added character - search query now: '{}'", self.search_query);
+            println!("Added character - search query now: '{}'", self.search_query);
         } else {
-            tracing::debug!("Ignoring control character: {:?}", c);
+            println!("Ignoring control character: {:?}", c);
         }
         
         // Update display text
@@ -692,115 +712,70 @@ impl Inlyne {
         if self.search_query.is_empty() {
             self.search_matches.clear();
             self.current_match = None;
-            tracing::debug!("Search query empty, clearing matches");
             return;
         }
+        
+        println!("=== SEARCHING FOR: '{}' ===", self.search_query);
         
         self.search_matches.clear();
         let query_lower = self.search_query.to_lowercase();
         
-        tracing::info!("===== SEARCH DEBUG START =====");
-        tracing::info!("Searching for '{}' in {} positioned elements", query_lower, self.elements.len());
-        
-        // Helper function to recursively search through elements
-        fn search_elements(
-            elements: &[Positioned<Element>],
-            query_lower: &str,
-            matches: &mut Vec<(usize, usize)>,
-            base_idx: &mut usize,
-            all_text_preview: &mut Vec<String>,
-        ) {
-            for element in elements.iter() {
-                match &element.inner {
-                    Element::TextBox(text_box) => {
-                        let elem_idx = *base_idx;
-                        *base_idx += 1;
-                        
-                        tracing::debug!("Element[{}] is TextBox with {} text segments", elem_idx, text_box.texts.len());
-                        
-                        for (text_idx, text) in text_box.texts.iter().enumerate() {
-                            let text_lower = text.text.to_lowercase();
-                            
-                            // Store first 10 text samples for debugging
-                            if all_text_preview.len() < 10 {
-                                all_text_preview.push(format!("[{}][{}]: '{}'", 
-                                    elem_idx, text_idx,
-                                    if text.text.len() > 40 {
-                                        format!("{}...", &text.text[..40])
-                                    } else {
-                                        text.text.clone()
-                                    }
-                                ));
-                            }
-                            
-                            tracing::trace!("  Checking text[{}][{}]: '{}' (len={})", 
-                                elem_idx, text_idx, 
-                                if text.text.len() > 50 { 
-                                    format!("{}...", &text.text[..50]) 
-                                } else { 
-                                    text.text.clone() 
-                                },
-                                text.text.len()
-                            );
-                            
-                            if text_lower.contains(query_lower) {
-                                matches.push((elem_idx, text_idx));
-                                tracing::info!("  ✓ MATCH found at element[{}].text[{}]: '{}'", 
-                                    elem_idx, text_idx,
-                                    if text.text.len() > 60 { 
-                                        format!("{}...", &text.text[..60]) 
-                                    } else { 
-                                        text.text.clone() 
-                                    }
-                                );
-                            }
+        // Simple flat search through all elements
+        let mut elem_count = 0;
+        for (pos_idx, positioned_element) in self.elements.iter().enumerate() {
+            match &positioned_element.inner {
+                Element::TextBox(text_box) => {
+                    println!("TextBox[{}] has {} text parts:", elem_count, text_box.texts.len());
+                    for (text_idx, text) in text_box.texts.iter().enumerate() {
+                        println!("  Text[{}]: '{}'", text_idx, text.text);
+                        if text.text.to_lowercase().contains(&query_lower) {
+                            self.search_matches.push((elem_count, text_idx));
+                            println!("    -> MATCH FOUND!");
                         }
                     }
-                    Element::Section(section) => {
-                        tracing::debug!("Element is Section with {} sub-elements, searching recursively", section.elements.len());
-                        // Recursively search within section elements
-                        search_elements(&section.elements, query_lower, matches, base_idx, all_text_preview);
+                    elem_count += 1;
+                }
+                Element::Section(section) => {
+                    println!("Section[{}] has {} sub-elements:", pos_idx, section.elements.len());
+                    for (sub_idx, sub_element) in section.elements.iter().enumerate() {
+                        if let Element::TextBox(text_box) = &sub_element.inner {
+                            println!("  SubTextBox[{}] has {} text parts:", elem_count, text_box.texts.len());
+                            for (text_idx, text) in text_box.texts.iter().enumerate() {
+                                println!("    Text[{}]: '{}'", text_idx, text.text);
+                                if text.text.to_lowercase().contains(&query_lower) {
+                                    self.search_matches.push((elem_count, text_idx));
+                                    println!("      -> MATCH FOUND!");
+                                }
+                            }
+                            elem_count += 1;
+                        } else {
+                            println!("  SubElement[{}]: Not a TextBox", sub_idx);
+                        }
                     }
-                    _ => {
-                        *base_idx += 1;
-                        // Other element types don't contain searchable text
-                    }
+                }
+                _ => {
+                    println!("Element[{}]: Not searchable type", pos_idx);
                 }
             }
         }
         
-        // Search through all elements recursively
-        let mut base_idx = 0;
-        let mut all_text_preview = Vec::new();
-        search_elements(&self.elements, &query_lower, &mut self.search_matches, &mut base_idx, &mut all_text_preview);
-        
-        tracing::info!("Search summary:");
-        tracing::info!("  - Total top-level elements: {}", self.elements.len());
-        tracing::info!("  - Total searchable elements checked: {}", base_idx);
-        tracing::info!("  - Matches found: {}", self.search_matches.len());
-        
-        if !all_text_preview.is_empty() {
-            tracing::info!("First few text segments in document:");
-            for preview in all_text_preview.iter() {
-                tracing::info!("  {}", preview);
-            }
-        }
-        
-        tracing::info!("===== SEARCH DEBUG END =====");
+        println!("Search complete: {} matches found", self.search_matches.len());
         
         // Set current match to first result
         if !self.search_matches.is_empty() {
+            println!("Found {} matches, setting current_match to 0", self.search_matches.len());
             self.current_match = Some(0);
             self.jump_to_current_match();
             // Update display with match count
-            if let Some(current) = self.current_match {
-                self.search_display_text = format!("Search: {} ({}/{})", 
-                    self.search_query, current + 1, self.search_matches.len());
-            }
+            self.search_display_text = format!("Search: {} ({}/{})", 
+                self.search_query, 1, self.search_matches.len());
+            println!("Search state after finding matches: active={}, current_match={:?}", 
+                self.search_active, self.current_match);
         } else {
+            println!("No matches found for '{}'", self.search_query);
             self.current_match = None;
             if !self.search_query.is_empty() {
-                self.search_display_text = format!("Search: {} (No matches)", self.search_query);
+                self.search_display_text = format!("Search: {} (0 matches)", self.search_query);
             }
         }
         
@@ -808,86 +783,97 @@ impl Inlyne {
         if self.search_active {
             self.window.set_title(&format!("[SEARCH] {}", self.search_display_text));
         }
-        
-        tracing::info!("Search for '{}' found {} matches", self.search_query, self.search_matches.len());
     }
 
     fn next_match(&mut self) {
         if self.search_matches.is_empty() {
+            println!("next_match: No matches to navigate");
             return;
         }
         
+        let old_match = self.current_match;
         self.current_match = match self.current_match {
             Some(idx) => Some((idx + 1) % self.search_matches.len()),
             None => Some(0),
         };
         
+        println!("next_match: Moving from {:?} to {:?} (total: {})", 
+            old_match, self.current_match, self.search_matches.len());
+        
         self.jump_to_current_match();
         // Update display with current match
-        if let Some(idx) = self.current_match {
-            self.search_display_text = format!("Search: {} ({}/{})", 
-                self.search_query, idx + 1, self.search_matches.len());
-            // Update window title
-            self.window.set_title(&format!("[SEARCH] {}", self.search_display_text));
-        }
+        self.search_display_text = format!("Search: {} ({}/{})", 
+            self.search_query, self.current_match.unwrap_or(0) + 1, self.search_matches.len());
+        // Update window title
+        self.window.set_title(&format!("[SEARCH] {}", self.search_display_text));
         self.window.request_redraw();
     }
 
     fn prev_match(&mut self) {
         if self.search_matches.is_empty() {
+            println!("prev_match: No matches to navigate");
             return;
         }
         
+        let old_match = self.current_match;
         self.current_match = match self.current_match {
             Some(0) => Some(self.search_matches.len() - 1),
             Some(idx) => Some(idx - 1),
             None => Some(self.search_matches.len() - 1),
         };
         
+        println!("prev_match: Moving from {:?} to {:?} (total: {})", 
+            old_match, self.current_match, self.search_matches.len());
+        
         self.jump_to_current_match();
         // Update display with current match
-        if let Some(idx) = self.current_match {
-            self.search_display_text = format!("Search: {} ({}/{})", 
-                self.search_query, idx + 1, self.search_matches.len());
-            // Update window title
-            self.window.set_title(&format!("[SEARCH] {}", self.search_display_text));
-        }
+        self.search_display_text = format!("Search: {} ({}/{})", 
+            self.search_query, self.current_match.unwrap_or(0) + 1, self.search_matches.len());
+        // Update window title
+        self.window.set_title(&format!("[SEARCH] {}", self.search_display_text));
         self.window.request_redraw();
     }
 
     fn jump_to_current_match(&mut self) {
         if let Some(match_idx) = self.current_match {
             if let Some(&(elem_idx, _)) = self.search_matches.get(match_idx) {
-                // Helper function to find element by index recursively
-                fn find_element_by_index<'a>(elements: &'a [Positioned<Element>], target_idx: usize, current_idx: &mut usize) -> Option<&'a Positioned<Element>> {
-                    for element in elements {
-                        match &element.inner {
-                            Element::TextBox(_) => {
-                                if *current_idx == target_idx {
-                                    return Some(element);
-                                }
-                                *current_idx += 1;
+                // Find the element using the same indexing as search
+                let mut current_idx = 0;
+                let mut target_element = None;
+                
+                for positioned_element in &self.elements {
+                    match &positioned_element.inner {
+                        Element::TextBox(_) => {
+                            if current_idx == elem_idx {
+                                target_element = Some(positioned_element);
+                                break;
                             }
-                            Element::Section(section) => {
-                                // Recursively search within section
-                                if let Some(found) = find_element_by_index(&section.elements, target_idx, current_idx) {
-                                    return Some(found);
+                            current_idx += 1;
+                        }
+                        Element::Section(section) => {
+                            for sub_element in &section.elements {
+                                if let Element::TextBox(_) = &sub_element.inner {
+                                    if current_idx == elem_idx {
+                                        target_element = Some(sub_element);
+                                        break;
+                                    }
+                                    current_idx += 1;
                                 }
                             }
-                            _ => {
-                                *current_idx += 1;
+                            if target_element.is_some() {
+                                break;
                             }
                         }
+                        _ => {}
                     }
-                    None
                 }
                 
-                let mut idx = 0;
-                if let Some(element) = find_element_by_index(&self.elements, elem_idx, &mut idx) {
+                if let Some(element) = target_element {
                     if let Some(bounds) = &element.bounds {
                         // Scroll to make the match visible
                         let target_y = bounds.pos.1 - 100.0; // Leave some margin above
                         self.renderer.set_scroll_y(target_y);
+                        println!("Jumped to match at y={}", target_y);
                     }
                 }
             }
@@ -1196,21 +1182,27 @@ impl Inlyne {
                     },
                     WindowEvent::ModifiersChanged(new_state) => modifiers = new_state,
                     WindowEvent::ReceivedCharacter(c) => {
-                        tracing::trace!("ReceivedCharacter event: {:?} (search_active: {})", c, self.search_active);
                         if self.search_active {
-                            // Handle character input for search
-                            if c == '\x1b' {
-                                // Escape key - cancel search
-                                tracing::debug!("Escape key - canceling search");
-                                self.cancel_search();
-                            } else if c == '\r' || c == '\n' || c == '\t' {
-                                // Enter, newline, and tab are handled in KeyboardInput event
-                                // Skip these characters in text input
-                                tracing::trace!("Skipping special character in search: {:?}", c);
-                            } else {
-                                // Regular character or backspace
-                                self.update_search_query(c);
+                            // Only process text input in ReceivedCharacter event
+                            // All navigation and control keys are handled in KeyboardInput event
+                            
+                            // Skip control characters and special keys
+                            if c.is_control() && c != '\u{8}' {
+                                // Skip all control characters except backspace
+                                println!("ReceivedCharacter: Skipping control char '{:?}' (will be handled by KeyboardInput)", c);
+                                return;
                             }
+                            
+                            // Skip 'n' when we have matches (it's for navigation)
+                            // But only for lowercase 'n' - uppercase 'N' can be typed
+                            if c == 'n' && !self.search_matches.is_empty() {
+                                println!("ReceivedCharacter: Skipping 'n' (used for navigation, {} matches exist)", self.search_matches.len());
+                                return;
+                            }
+                            
+                            // Process regular text input
+                            println!("ReceivedCharacter: Processing '{:?}' as text input", c);
+                            self.update_search_query(c);
                         } else if c == '?' {
                             // Handle '?' character for help when not searching
                             if !self.help_visible {
@@ -1234,7 +1226,16 @@ impl Inlyne {
                     } => {
                         let key = Key::new(virtual_keycode, scancode);
                         let modified_key = ModifiedKey(key, modifiers);
+                        
+                        // Process keyboard input for actions (including navigation)
                         if let Some(action) = self.keycombos.munch(modified_key) {
+                            // Debug logging for search-related actions
+                            if self.search_active && matches!(action, 
+                                Action::Search | Action::NextMatch | Action::PrevMatch | Action::CancelSearch | Action::Quit) {
+                                println!("KeyboardInput: Processing action {:?} (key={:?}, modifiers={:?})", 
+                                    action, virtual_keycode, modifiers);
+                            }
+                            
                             match action {
                                 Action::ToEdge(direction) => {
                                     let scroll = match direction {
@@ -1305,16 +1306,27 @@ impl Inlyne {
                                     self.cancel_search();
                                 }
                                 Action::NextMatch => {
-                                    if self.search_active {
+                                    if self.search_active && !self.search_matches.is_empty() {
+                                        println!("NextMatch: Navigating to next match");
                                         self.next_match();
                                     }
                                 }
                                 Action::PrevMatch => {
+                                    println!("PrevMatch action received (search_active={}, matches={})", 
+                                        self.search_active, self.search_matches.len());
                                     if self.search_active {
-                                        self.prev_match();
+                                        if !self.search_matches.is_empty() {
+                                            println!("Executing prev_match()");
+                                            self.prev_match();
+                                        } else {
+                                            println!("No matches to navigate through");
+                                        }
+                                    } else {
+                                        println!("PrevMatch ignored - search not active");
                                     }
                                 }
                                 Action::Quit => {
+                                    // Escape key handling - first press cancels search, second press may quit
                                     if self.search_active {
                                         self.cancel_search();
                                     } else if self.help_visible {

@@ -66,7 +66,6 @@ base = [
     ["ToBottom", "End"],
     ["Quit", "Escape"],
     ["Help", { key = "/", mod = ["Shift"] }],
-    ["Search", "f"],
     ["Search", { key = "f", mod = "CTRL_OR_CMD" }],
     ["NextMatch", "n"],
     ["NextMatch", "Enter"],

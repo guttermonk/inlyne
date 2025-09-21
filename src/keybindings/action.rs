@@ -1,5 +1,5 @@
 // Search-related actions are fully configurable through keybindings:
-// - Search: Toggle search mode (default: f, Ctrl+F)
+// - Search: Toggle search mode (default: Ctrl+F)
 // - CancelSearch: Exit search mode (handled by Escape)
 // - NextMatch: Navigate to next search result (default: n, Enter, Tab)
 // - PrevMatch: Navigate to previous search result (default: Shift+n, Shift+Tab)
