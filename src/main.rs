@@ -605,11 +605,36 @@ impl Inlyne {
             self.search_matches.clear();
             self.current_match = None;
             self.search_display_text = "Type to search...".to_string();
+            
+            // Update window title to show search mode
+            self.window.set_title(&format!("[SEARCH MODE] {}", self.search_display_text));
+            
             tracing::info!("Search activated - ready to receive input");
-            tracing::debug!("Total elements available for search: {}", self.elements.len());
+            tracing::info!("Total elements available: {}", self.elements.len());
+            
+            // Debug: Show first few TextBox contents
+            let mut text_box_count = 0;
+            for (idx, element) in self.elements.iter().take(5).enumerate() {
+                if let Element::TextBox(tb) = &element.inner {
+                    text_box_count += 1;
+                    tracing::info!("  Element[{}] TextBox has {} text segments", idx, tb.texts.len());
+                    for (t_idx, text) in tb.texts.iter().take(2).enumerate() {
+                        tracing::info!("    Text[{}]: '{}'", t_idx,
+                            if text.text.len() > 30 {
+                                format!("{}...", &text.text[..30])
+                            } else {
+                                text.text.clone()
+                            }
+                        );
+                    }
+                }
+            }
+            tracing::info!("Found {} TextBox elements in first 5 elements", text_box_count);
         } else {
             tracing::info!("Search deactivated");
             self.search_display_text.clear();
+            // Restore original window title
+            self.window.set_title(&utils::format_title(&self.opts.history.get_path()));
         }
         self.window.request_redraw();
     }
@@ -621,6 +646,8 @@ impl Inlyne {
             self.search_matches.clear();
             self.current_match = None;
             self.search_display_text.clear();
+            // Restore original window title
+            self.window.set_title(&utils::format_title(&self.opts.history.get_path()));
             tracing::info!("Search cancelled");
             self.window.request_redraw();
         }
@@ -651,6 +678,11 @@ impl Inlyne {
             self.search_display_text = format!("Search: {}", self.search_query);
         }
         
+        // Update window title to show current search query
+        if self.search_active {
+            self.window.set_title(&format!("[SEARCH] {}", self.search_display_text));
+        }
+        
         // Perform search with updated query
         self.perform_search();
         self.window.request_redraw();
@@ -667,40 +699,94 @@ impl Inlyne {
         self.search_matches.clear();
         let query_lower = self.search_query.to_lowercase();
         
-        tracing::debug!("Searching for '{}' in {} elements", query_lower, self.elements.len());
+        tracing::info!("===== SEARCH DEBUG START =====");
+        tracing::info!("Searching for '{}' in {} positioned elements", query_lower, self.elements.len());
         
-        // Search through all text elements
-        let mut total_text_boxes = 0;
-        let mut total_texts = 0;
-        for (elem_idx, element) in self.elements.iter().enumerate() {
-            if let Element::TextBox(text_box) = &element.inner {
-                total_text_boxes += 1;
-                for (text_idx, text) in text_box.texts.iter().enumerate() {
-                    total_texts += 1;
-                    let text_lower = text.text.to_lowercase();
-                    tracing::trace!("Checking text[{}][{}]: '{}'", elem_idx, text_idx, 
-                        if text.text.len() > 50 { 
-                            format!("{}...", &text.text[..50]) 
-                        } else { 
-                            text.text.clone() 
-                        }
-                    );
-                    if text_lower.contains(&query_lower) {
-                        self.search_matches.push((elem_idx, text_idx));
-                        tracing::debug!("Found match at element {} text {}: '{}'", 
-                            elem_idx, text_idx,
-                            if text.text.len() > 50 { 
-                                format!("{}...", &text.text[..50]) 
-                            } else { 
-                                text.text.clone() 
+        // Helper function to recursively search through elements
+        fn search_elements(
+            elements: &[Positioned<Element>],
+            query_lower: &str,
+            matches: &mut Vec<(usize, usize)>,
+            base_idx: &mut usize,
+            all_text_preview: &mut Vec<String>,
+        ) {
+            for element in elements.iter() {
+                match &element.inner {
+                    Element::TextBox(text_box) => {
+                        let elem_idx = *base_idx;
+                        *base_idx += 1;
+                        
+                        tracing::debug!("Element[{}] is TextBox with {} text segments", elem_idx, text_box.texts.len());
+                        
+                        for (text_idx, text) in text_box.texts.iter().enumerate() {
+                            let text_lower = text.text.to_lowercase();
+                            
+                            // Store first 10 text samples for debugging
+                            if all_text_preview.len() < 10 {
+                                all_text_preview.push(format!("[{}][{}]: '{}'", 
+                                    elem_idx, text_idx,
+                                    if text.text.len() > 40 {
+                                        format!("{}...", &text.text[..40])
+                                    } else {
+                                        text.text.clone()
+                                    }
+                                ));
                             }
-                        );
+                            
+                            tracing::trace!("  Checking text[{}][{}]: '{}' (len={})", 
+                                elem_idx, text_idx, 
+                                if text.text.len() > 50 { 
+                                    format!("{}...", &text.text[..50]) 
+                                } else { 
+                                    text.text.clone() 
+                                },
+                                text.text.len()
+                            );
+                            
+                            if text_lower.contains(query_lower) {
+                                matches.push((elem_idx, text_idx));
+                                tracing::info!("  ✓ MATCH found at element[{}].text[{}]: '{}'", 
+                                    elem_idx, text_idx,
+                                    if text.text.len() > 60 { 
+                                        format!("{}...", &text.text[..60]) 
+                                    } else { 
+                                        text.text.clone() 
+                                    }
+                                );
+                            }
+                        }
+                    }
+                    Element::Section(section) => {
+                        tracing::debug!("Element is Section with {} sub-elements, searching recursively", section.elements.len());
+                        // Recursively search within section elements
+                        search_elements(&section.elements, query_lower, matches, base_idx, all_text_preview);
+                    }
+                    _ => {
+                        *base_idx += 1;
+                        // Other element types don't contain searchable text
                     }
                 }
             }
         }
         
-        tracing::debug!("Searched {} text boxes with {} total text segments", total_text_boxes, total_texts);
+        // Search through all elements recursively
+        let mut base_idx = 0;
+        let mut all_text_preview = Vec::new();
+        search_elements(&self.elements, &query_lower, &mut self.search_matches, &mut base_idx, &mut all_text_preview);
+        
+        tracing::info!("Search summary:");
+        tracing::info!("  - Total top-level elements: {}", self.elements.len());
+        tracing::info!("  - Total searchable elements checked: {}", base_idx);
+        tracing::info!("  - Matches found: {}", self.search_matches.len());
+        
+        if !all_text_preview.is_empty() {
+            tracing::info!("First few text segments in document:");
+            for preview in all_text_preview.iter() {
+                tracing::info!("  {}", preview);
+            }
+        }
+        
+        tracing::info!("===== SEARCH DEBUG END =====");
         
         // Set current match to first result
         if !self.search_matches.is_empty() {
@@ -716,6 +802,11 @@ impl Inlyne {
             if !self.search_query.is_empty() {
                 self.search_display_text = format!("Search: {} (No matches)", self.search_query);
             }
+        }
+        
+        // Update window title with search results
+        if self.search_active {
+            self.window.set_title(&format!("[SEARCH] {}", self.search_display_text));
         }
         
         tracing::info!("Search for '{}' found {} matches", self.search_query, self.search_matches.len());
@@ -736,6 +827,8 @@ impl Inlyne {
         if let Some(idx) = self.current_match {
             self.search_display_text = format!("Search: {} ({}/{})", 
                 self.search_query, idx + 1, self.search_matches.len());
+            // Update window title
+            self.window.set_title(&format!("[SEARCH] {}", self.search_display_text));
         }
         self.window.request_redraw();
     }
@@ -756,6 +849,8 @@ impl Inlyne {
         if let Some(idx) = self.current_match {
             self.search_display_text = format!("Search: {} ({}/{})", 
                 self.search_query, idx + 1, self.search_matches.len());
+            // Update window title
+            self.window.set_title(&format!("[SEARCH] {}", self.search_display_text));
         }
         self.window.request_redraw();
     }
@@ -763,7 +858,32 @@ impl Inlyne {
     fn jump_to_current_match(&mut self) {
         if let Some(match_idx) = self.current_match {
             if let Some(&(elem_idx, _)) = self.search_matches.get(match_idx) {
-                if let Some(element) = self.elements.get(elem_idx) {
+                // Helper function to find element by index recursively
+                fn find_element_by_index<'a>(elements: &'a [Positioned<Element>], target_idx: usize, current_idx: &mut usize) -> Option<&'a Positioned<Element>> {
+                    for element in elements {
+                        match &element.inner {
+                            Element::TextBox(_) => {
+                                if *current_idx == target_idx {
+                                    return Some(element);
+                                }
+                                *current_idx += 1;
+                            }
+                            Element::Section(section) => {
+                                // Recursively search within section
+                                if let Some(found) = find_element_by_index(&section.elements, target_idx, current_idx) {
+                                    return Some(found);
+                                }
+                            }
+                            _ => {
+                                *current_idx += 1;
+                            }
+                        }
+                    }
+                    None
+                }
+                
+                let mut idx = 0;
+                if let Some(element) = find_element_by_index(&self.elements, elem_idx, &mut idx) {
                     if let Some(bounds) = &element.bounds {
                         // Scroll to make the match visible
                         let target_y = bounds.pos.1 - 100.0; // Leave some margin above
