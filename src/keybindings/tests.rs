@@ -69,7 +69,7 @@ base = [
     ["Search", "f"],
     ["Search", { key = "f", mod = "CTRL_OR_CMD" }],
     ["NextMatch", "n"],
-    ["NextMatch", "Return"],
+    ["NextMatch", "Enter"],
     ["NextMatch", "Tab"],
     ["PrevMatch", { key = "n", mod = ["Shift"] }],
     ["PrevMatch", { key = "Tab", mod = ["Shift"] }],
