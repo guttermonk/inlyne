@@ -7,6 +7,8 @@ pub enum Action {
     Zoom(Zoom),
     Copy,
     Help,
+    Search,
+    CancelSearch,
     Quit,
 }
 

@@ -62,7 +62,8 @@ use anyhow::Context;
 use clap::Parser;
 use taffy::Taffy;
 use winit::event::{
-    ElementState, Event, KeyboardInput, ModifiersState, MouseButton, MouseScrollDelta, WindowEvent,
+    ElementState, Event, KeyboardInput, ModifiersState, MouseButton, MouseScrollDelta, 
+    VirtualKeyCode, WindowEvent,
 };
 use winit::event_loop::{ControlFlow, EventLoop, EventLoopBuilder, EventLoopProxy};
 use winit::window::{CursorIcon, Window, WindowBuilder};
@@ -155,6 +156,11 @@ pub struct Inlyne {
     saved_scroll_y: f32,
     current_file_content: String,
     event_loop_proxy: EventLoopProxy<InlyneEvent>,
+    // Search state
+    search_active: bool,
+    search_query: String,
+    search_matches: Vec<(usize, usize)>, // (element_index, text_index)
+    current_match: Option<usize>,
 }
 
 impl Inlyne {
@@ -251,6 +257,10 @@ impl Inlyne {
             saved_scroll_y: 0.0,
             current_file_content: md_string,
             event_loop_proxy,
+            search_active: false,
+            search_query: String::new(),
+            search_matches: Vec::new(),
+            current_match: None,
         })
     }
 
@@ -278,6 +288,8 @@ impl Inlyne {
                 Action::History(HistDirection::Prev) => "Previous File",
                 Action::Copy => "Copy Selection",
                 Action::Help => "Toggle Help",
+                Action::Search => "Toggle Search",
+                Action::CancelSearch => "Cancel Search",
                 Action::Quit => "Quit",
             };
             
@@ -577,8 +589,138 @@ impl Inlyne {
         self.renderer.positioner.reserved_height = total_height;
         
         // Restore scroll position
-        self.renderer.set_scroll_y(self.saved_scroll_y);
+        self.renderer.scroll_y = self.saved_scroll_y;
         self.window.request_redraw();
+    }
+
+    fn toggle_search(&mut self) {
+        self.search_active = !self.search_active;
+        if self.search_active {
+            // Clear previous search state
+            self.search_query.clear();
+            self.search_matches.clear();
+            self.current_match = None;
+            tracing::info!("Search activated");
+        } else {
+            tracing::info!("Search deactivated");
+        }
+        self.window.request_redraw();
+    }
+
+    fn cancel_search(&mut self) {
+        if self.search_active {
+            self.search_active = false;
+            self.search_query.clear();
+            self.search_matches.clear();
+            self.current_match = None;
+            tracing::info!("Search cancelled");
+            self.window.request_redraw();
+        }
+    }
+
+    fn update_search_query(&mut self, c: char) {
+        if !self.search_active {
+            return;
+        }
+        
+        // Handle backspace
+        if c == '\u{8}' {
+            self.search_query.pop();
+        } else if !c.is_control() {
+            self.search_query.push(c);
+        }
+        
+        // Perform search with updated query
+        self.perform_search();
+        self.window.request_redraw();
+    }
+
+    fn perform_search(&mut self) {
+        if self.search_query.is_empty() {
+            self.search_matches.clear();
+            self.current_match = None;
+            return;
+        }
+        
+        self.search_matches.clear();
+        let query_lower = self.search_query.to_lowercase();
+        
+        // Search through all text elements
+        for (elem_idx, element) in self.elements.iter().enumerate() {
+            if let Element::TextBox(text_box) = &element.inner {
+                for (text_idx, text) in text_box.texts.iter().enumerate() {
+                    if text.text.to_lowercase().contains(&query_lower) {
+                        self.search_matches.push((elem_idx, text_idx));
+                    }
+                }
+            }
+        }
+        
+        // Set current match to first result
+        if !self.search_matches.is_empty() {
+            self.current_match = Some(0);
+            self.jump_to_current_match();
+        } else {
+            self.current_match = None;
+        }
+        
+        tracing::info!("Search for '{}' found {} matches", self.search_query, self.search_matches.len());
+    }
+
+    fn next_match(&mut self) {
+        if self.search_matches.is_empty() {
+            return;
+        }
+        
+        self.current_match = match self.current_match {
+            Some(idx) => Some((idx + 1) % self.search_matches.len()),
+            None => Some(0),
+        };
+        
+        self.jump_to_current_match();
+        self.window.request_redraw();
+    }
+
+    fn prev_match(&mut self) {
+        if self.search_matches.is_empty() {
+            return;
+        }
+        
+        self.current_match = match self.current_match {
+            Some(0) => Some(self.search_matches.len() - 1),
+            Some(idx) => Some(idx - 1),
+            None => Some(self.search_matches.len() - 1),
+        };
+        
+        self.jump_to_current_match();
+        self.window.request_redraw();
+    }
+
+    fn jump_to_current_match(&mut self) {
+        if let Some(match_idx) = self.current_match {
+            if let Some(&(elem_idx, _)) = self.search_matches.get(match_idx) {
+                if let Some(element) = self.elements.get(elem_idx) {
+                    if let Some(bounds) = &element.bounds {
+                        // Scroll to make the match visible
+                        let target_y = bounds.pos.1 - 100.0; // Leave some margin above
+                        self.renderer.set_scroll_y(target_y);
+                    }
+                }
+            }
+        }
+    }
+
+    fn is_current_search_match(&self, elem_idx: usize, text_idx: usize) -> bool {
+        if !self.search_active || self.search_query.is_empty() {
+            return false;
+        }
+        
+        if let Some(current) = self.current_match {
+            if let Some(&(match_elem, match_text)) = self.search_matches.get(current) {
+                return elem_idx == match_elem && text_idx == match_text;
+            }
+        }
+        false
     }
 
     fn update_file(&mut self, path: &Path, contents: String) {
@@ -672,8 +814,16 @@ impl Inlyne {
                         &mut self.elements
                     };
                     
+                    // Pass search state to redraw for integrated rendering
                     self.renderer
-                        .redraw(elements_to_render, &mut self.selection)
+                        .redraw(
+                            elements_to_render, 
+                            &mut self.selection,
+                            self.search_active,
+                            &self.search_query,
+                            self.current_match,
+                            self.search_matches.len(),
+                        )
                         .context("Renderer failed to redraw the screen")
                         .unwrap();
 
@@ -873,8 +1023,23 @@ impl Inlyne {
                     },
                     WindowEvent::ModifiersChanged(new_state) => modifiers = new_state,
                     WindowEvent::ReceivedCharacter(c) => {
-                        // Handle '?' character directly for better keyboard layout compatibility
-                        if c == '?' {
+                        if self.search_active {
+                            // Handle character input for search
+                            if c == '\r' || c == '\n' {
+                                // Enter key - go to next match
+                                self.next_match();
+                            } else if c == '\x1b' {
+                                // Escape key - cancel search
+                                self.cancel_search();
+                            } else if c == '\t' {
+                                // Tab handled in KeyboardInput event
+                                // Skip tab character in text input
+                            } else {
+                                // Regular character or backspace
+                                self.update_search_query(c);
+                            }
+                        } else if c == '?' {
+                            // Handle '?' character for help when not searching
                             if !self.help_visible {
                                 self.help_visible = true;
                                 self.show_help();
@@ -894,6 +1059,35 @@ impl Inlyne {
                             },
                         ..
                     } => {
+                        // Handle search-specific keyboard shortcuts
+                        if self.search_active {
+                            if let Some(vk) = virtual_keycode {
+                                match vk {
+                                    VirtualKeyCode::Tab => {
+                                        if modifiers.shift() {
+                                            self.prev_match();
+                                        } else {
+                                            self.next_match();
+                                        }
+                                        return;
+                                    }
+                                    VirtualKeyCode::N => {
+                                        if modifiers.shift() {
+                                            self.prev_match();
+                                        } else {
+                                            self.next_match();
+                                        }
+                                        return;
+                                    }
+                                    VirtualKeyCode::Escape => {
+                                        self.cancel_search();
+                                        return;
+                                    }
+                                    _ => {}
+                                }
+                            }
+                        }
+                        
                         let key = Key::new(virtual_keycode, scancode);
                         let modified_key = ModifiedKey(key, modifiers);
                         if let Some(action) = self.keycombos.munch(modified_key) {
@@ -960,8 +1154,16 @@ impl Inlyne {
                                         self.hide_help();
                                     }
                                 }
+                                Action::Search => {
+                                    self.toggle_search();
+                                }
+                                Action::CancelSearch => {
+                                    self.cancel_search();
+                                }
                                 Action::Quit => {
-                                    if self.help_visible {
+                                    if self.search_active {
+                                        self.cancel_search();
+                                    } else if self.help_visible {
                                         self.help_visible = false;
                                         self.hide_help();
                                     } else {

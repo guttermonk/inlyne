@@ -82,7 +82,7 @@ pub fn defaults() -> Vec<(Action, KeyCombo)> {
             Action::ToEdge(VertDirection::Down),
             KeyCombo::from(VirtKey::End),
         ),
-        // Quit: Esc
+        // Quit: Esc (also cancels search if active)
         (Action::Quit, KeyCombo::from(VirtKey::Escape)),
         // Help: ? (Shift+/)
         (
@@ -91,6 +91,13 @@ pub fn defaults() -> Vec<(Action, KeyCombo)> {
                 Key::from(VirtKey::Slash),
                 ModifiersState::SHIFT,
             )]),
+        ),
+        // Search: f
+        (Action::Search, KeyCombo::from(VirtKey::F)),
+        // Search: Ctrl+F / Command+F
+        (
+            Action::Search,
+            KeyCombo(vec![ModifiedKey(Key::from(VirtKey::F), ctrl_or_command)]),
         ),
         // vim-like bindings
         // Help: h

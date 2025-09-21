@@ -574,6 +574,91 @@ impl Renderer {
         Ok(())
     }
 
+    fn prepare_search_ui(
+        &mut self,
+        search_active: bool,
+        search_query: &str,
+        current_match: Option<usize>,
+        total_matches: usize,
+    ) {
+        if !search_active {
+            return;
+        }
+
+        let screen_size = self.screen_size();
+        let search_bar_height = 40.0 * self.hidpi_scale;
+        
+        // Prepare search bar background rectangle
+        let search_bar_rect = Rect::new(
+            (0.0, screen_size.1 - search_bar_height),
+            (screen_size.0, search_bar_height),
+        );
+        
+        // Add search bar background to lyon buffer
+        let min = point(search_bar_rect.pos.0, search_bar_rect.pos.1, screen_size);
+        let max = point(search_bar_rect.max().0, search_bar_rect.max().1, screen_size);
+        let color = [0.1, 0.1, 0.1, 0.9];
+        self.lyon_buffer.vertices.push(Vertex {
+            position: [min.0, min.1],
+            color,
+        });
+        self.lyon_buffer.vertices.push(Vertex {
+            position: [max.0, min.1],
+            color,
+        });
+        self.lyon_buffer.vertices.push(Vertex {
+            position: [max.0, max.1],
+            color,
+        });
+        self.lyon_buffer.vertices.push(Vertex {
+            position: [min.0, max.1],
+            color,
+        });
+        let base = self.lyon_buffer.vertices.len() as u16 - 4;
+        self.lyon_buffer.indices.extend_from_slice(&[
+            base,
+            base + 1,
+            base + 2,
+            base,
+            base + 2,
+            base + 3,
+        ]);
+        
+        // Add border line
+        let border_rect = Rect::new(
+            (0.0, screen_size.1 - search_bar_height - 1.0),
+            (screen_size.0, 1.0),
+        );
+        let border_color = [0.3, 0.3, 0.3, 1.0];
+        let border_min = point(border_rect.pos.0, border_rect.pos.1, screen_size);
+        let border_max = point(border_rect.max().0, border_rect.max().1, screen_size);
+        self.lyon_buffer.vertices.push(Vertex {
+            position: [border_min.0, border_min.1],
+            color: border_color,
+        });
+        self.lyon_buffer.vertices.push(Vertex {
+            position: [border_max.0, border_min.1],
+            color: border_color,
+        });
+        self.lyon_buffer.vertices.push(Vertex {
+            position: [border_max.0, border_max.1],
+            color: border_color,
+        });
+        self.lyon_buffer.vertices.push(Vertex {
+            position: [border_min.0, border_max.1],
+            color: border_color,
+        });
+        let border_base = self.lyon_buffer.vertices.len() as u16 - 4;
+        self.lyon_buffer.indices.extend_from_slice(&[
+            border_base,
+            border_base + 1,
+            border_base + 2,
+            border_base,
+            border_base + 2,
+            border_base + 3,
+        ]);
+    }
+
     fn draw_rectangle(&mut self, rect: Rect, color: [f32; 4]) -> anyhow::Result<()> {
         let min = point(rect.pos.0, rect.pos.1, self.screen_size());
         let max = point(rect.max().0, rect.max().1, self.screen_size());
@@ -725,6 +810,10 @@ impl Renderer {
         &mut self,
         elements: &mut [Positioned<Element>],
         selection: &mut Selection,
+        search_active: bool,
+        search_query: &str,
+        current_match: Option<usize>,
+        total_matches: usize,
     ) -> anyhow::Result<()> {
         selection.text.clear();
         let frame = self
@@ -742,6 +831,9 @@ impl Renderer {
         self.lyon_buffer.indices.clear();
         self.lyon_buffer.vertices.clear();
         let cached_text_areas = self.render_elements(elements, selection)?;
+        
+        // Add search UI to lyon buffer if active
+        self.prepare_search_ui(search_active, search_query, current_match, total_matches);
         let vertex_buf = self
             .device
             .create_buffer_init(&wgpu::util::BufferInitDescriptor {
