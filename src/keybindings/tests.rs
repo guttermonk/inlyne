@@ -66,6 +66,13 @@ base = [
     ["ToBottom", "End"],
     ["Quit", "Escape"],
     ["Help", { key = "/", mod = ["Shift"] }],
+    ["Search", "f"],
+    ["Search", { key = "f", mod = "CTRL_OR_CMD" }],
+    ["NextMatch", "n"],
+    ["NextMatch", "Return"],
+    ["NextMatch", "Tab"],
+    ["PrevMatch", { key = "n", mod = ["Shift"] }],
+    ["PrevMatch", { key = "Tab", mod = ["Shift"] }],
     # Vim-like
     ["Help", "h"],
     ["Copy", "y"],
