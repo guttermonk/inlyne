@@ -159,7 +159,7 @@ pub struct Inlyne {
     // Search state
     search_active: bool,
     search_query: String,
-    search_matches: Vec<(usize, usize, usize)>, // (element_index, text_index, char_offset)
+    search_matches: Vec<(usize, usize, usize, usize)>, // (element_index, text_index, char_offset, cumulative_offset)
     current_match: Option<usize>,
     search_display_text: String,
 }
@@ -669,16 +669,18 @@ impl Inlyne {
         
         // Helper function to search text and add matches
         let mut add_text_matches = |elem_idx: usize, text_box: &TextBox| {
+            let mut cumulative_offset = 0;
             for (text_idx, text) in text_box.texts.iter().enumerate() {
                 let text_lower = text.text.to_lowercase();
                 // Find all occurrences of the search query in this text segment
                 let mut start = 0;
                 while let Some(pos) = text_lower[start..].find(&query_lower) {
                     let char_offset = start + pos;
-                    // Store element index, text index, and character offset
-                    self.search_matches.push((elem_idx, text_idx, char_offset));
+                    // Store element index, text index, character offset within segment, and cumulative offset
+                    self.search_matches.push((elem_idx, text_idx, char_offset, cumulative_offset + char_offset));
                     start = char_offset + query_lower.len();
                 }
+                cumulative_offset += text.text.len();
             }
         };
         
@@ -781,7 +783,7 @@ impl Inlyne {
 
     fn jump_to_current_match(&mut self) {
         if let Some(match_idx) = self.current_match {
-            if let Some(&(elem_idx, _, _)) = self.search_matches.get(match_idx) {
+            if let Some(&(elem_idx, _, _, _)) = self.search_matches.get(match_idx) {
                 // Find the element using the same indexing as search
                 let mut current_idx = 0;
                 let mut target_element = None;

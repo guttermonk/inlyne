@@ -10,7 +10,7 @@ use crate::opts::FontOptions;
 use crate::positioner::{Positioned, Positioner, DEFAULT_PADDING};
 use crate::selection::Selection;
 use crate::table::TABLE_ROW_GAP;
-use crate::text::{CachedTextArea, TextCache, TextSystem};
+use crate::text::{CachedTextArea, TextBox, TextCache, TextSystem};
 use crate::utils::{Point, Rect, Size};
 use crate::Element;
 
@@ -225,10 +225,98 @@ impl Renderer {
         self.theme.scrollbar_width as f32
     }
 
+    fn draw_search_highlights_with_tables(
+        &mut self,
+        elements: &[Positioned<Element>],
+        search_matches: &[(usize, usize, usize, usize)],
+        current_match: Option<usize>,
+        search_query: &str,
+    ) -> anyhow::Result<()> {
+        // First draw regular highlights
+        self.draw_search_highlights(elements, search_matches, current_match, search_query)?;
+        
+        // Then handle table highlights separately since they need layout information
+        let mut elem_idx = 0;
+        let char_width = 8.0 * self.hidpi_scale * self.zoom;
+        let estimated_match_width = (search_query.len() as f32 * char_width).max(20.0);
+        let screen_size = self.screen_size();
+        let centering = (screen_size.0 - self.page_width).max(0.) / 2.;
+        
+        for element in elements.iter() {
+            if let Some(bounds) = &element.bounds {
+                let pos = bounds.pos;
+                
+                match &element.inner {
+                    Element::TextBox(_) => {
+                        elem_idx += 1;
+                    }
+                    Element::Section(section) => {
+                        for sub_element in section.elements.iter() {
+                            if let Element::TextBox(_) = &sub_element.inner {
+                                elem_idx += 1;
+                            }
+                        }
+                    }
+                    Element::Table(table) => {
+                        // Calculate table layout to get cell positions
+                        let bounds = (
+                            (screen_size.0 - pos.0 - self.positioner.page_margin - centering).max(0.),
+                            f32::INFINITY,
+                        );
+                        
+                        let layout_result = table.layout(
+                            &mut self.text_system,
+                            &mut self.positioner.taffy,
+                            bounds,
+                            self.zoom,
+                        );
+                        
+                        if let std::result::Result::Ok(layout) = layout_result {
+                            // Check each table cell for matches
+                            for (row_idx, node_row) in layout.rows.iter().enumerate() {
+                                let table_row: &Vec<TextBox> = match table.rows.get(row_idx) {
+                                    Some(row) => row,
+                                    None => continue,
+                                };
+                                for (col_idx, node) in node_row.iter().enumerate() {
+                                    if col_idx < table_row.len() {
+                                        // Check if this cell index has any matches
+                                        for (match_idx, &(match_elem_idx, _text_idx, _char_offset, cumulative_offset)) in search_matches.iter().enumerate() {
+                                            if match_elem_idx == elem_idx {
+                                                // Draw highlight for this table cell match
+                                                let is_current = current_match == Some(match_idx);
+                                                let highlight_color = if is_current {
+                                                    [0.0, 1.0, 0.0, 0.4] // Bright green for current match
+                                                } else {
+                                                    [1.0, 0.8, 0.0, 0.3] // Yellow/orange for other matches
+                                                };
+                                                
+                                                let x_offset = cumulative_offset as f32 * char_width;
+                                                let highlight_rect = Rect::new(
+                                                    (pos.0 + node.location.x + x_offset, pos.1 + node.location.y - self.scroll_y),
+                                                    (estimated_match_width, node.size.height),
+                                                );
+                                                self.draw_rectangle(highlight_rect, highlight_color)?;
+                                            }
+                                        }
+                                        elem_idx += 1;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    _ => {}
+                }
+            }
+        }
+        
+        Ok(())
+    }
+
     fn draw_search_highlights(
         &mut self,
         elements: &[Positioned<Element>],
-        search_matches: &[(usize, usize, usize)],
+        search_matches: &[(usize, usize, usize, usize)],
         current_match: Option<usize>,
         search_query: &str,
     ) -> anyhow::Result<()> {
@@ -243,7 +331,7 @@ impl Renderer {
             match &element.inner {
                 Element::TextBox(_) => {
                     // Check if this element index has any matches
-                    for (match_idx, &(match_elem_idx, _text_idx, char_offset)) in search_matches.iter().enumerate() {
+                    for (match_idx, &(match_elem_idx, _text_idx, _char_offset, cumulative_offset)) in search_matches.iter().enumerate() {
                         if match_elem_idx == elem_idx {
                             // Draw highlight for this match at the correct position
                             if let Some(bounds) = &element.bounds {
@@ -254,8 +342,8 @@ impl Renderer {
                                     [1.0, 0.8, 0.0, 0.3] // Yellow/orange for other matches
                                 };
                                 
-                                // Calculate horizontal offset based on character position
-                                let x_offset = char_offset as f32 * char_width;
+                                // Use cumulative offset for correct positioning
+                                let x_offset = cumulative_offset as f32 * char_width;
                                 
                                 // Draw highlight rectangle at the correct position
                                 let highlight_rect = Rect::new(
@@ -273,7 +361,7 @@ impl Renderer {
                     for sub_element in section.elements.iter() {
                         if let Element::TextBox(_) = &sub_element.inner {
                             // Check if this element index has any matches
-                            for (match_idx, &(match_elem_idx, _text_idx, char_offset)) in search_matches.iter().enumerate() {
+                            for (match_idx, &(match_elem_idx, _text_idx, _char_offset, cumulative_offset)) in search_matches.iter().enumerate() {
                                 if match_elem_idx == elem_idx {
                                     // Draw highlight for this match
                                     if let Some(bounds) = &sub_element.bounds {
@@ -284,8 +372,8 @@ impl Renderer {
                                             [1.0, 0.8, 0.0, 0.3] // Yellow/orange for other matches
                                         };
                                         
-                                        // Calculate horizontal offset based on character position
-                                        let x_offset = char_offset as f32 * char_width;
+                                        // Use cumulative offset for correct positioning
+                                        let x_offset = cumulative_offset as f32 * char_width;
                                         
                                         // Draw highlight rectangle at the correct position
                                         let highlight_rect = Rect::new(
@@ -314,7 +402,7 @@ impl Renderer {
                     for cell in &row.elements {
                         if let Element::TextBox(_) = &cell.inner {
                             // Check if this element index has any matches
-                            for (match_idx, &(match_elem_idx, _text_idx, char_offset)) in search_matches.iter().enumerate() {
+                            for (match_idx, &(match_elem_idx, _text_idx, _char_offset, cumulative_offset)) in search_matches.iter().enumerate() {
                                 if match_elem_idx == elem_idx {
                                     // Draw highlight for this match
                                     if let Some(bounds) = &cell.bounds {
@@ -325,8 +413,8 @@ impl Renderer {
                                             [1.0, 0.8, 0.0, 0.3] // Yellow/orange for other matches
                                         };
                                         
-                                        // Calculate horizontal offset based on character position
-                                        let x_offset = char_offset as f32 * char_width;
+                                        // Use cumulative offset for correct positioning
+                                        let x_offset = cumulative_offset as f32 * char_width;
                                         
                                         // Draw highlight rectangle at the correct position
                                         let highlight_rect = Rect::new(
@@ -544,35 +632,33 @@ impl Renderer {
 
                     for (row, node_row) in layout.rows.iter().enumerate() {
                         for (col, node) in node_row.iter().enumerate() {
-                            if let Some(row) = table.rows.get(row) {
-                                if let Some(text_box) = row.get(col) {
-                                    text_areas.push(text_box.text_areas(
-                                        &mut self.text_system,
-                                        (pos.0 + node.location.x, pos.1 + node.location.y),
-                                        (node.size.width, f32::MAX),
-                                        self.zoom,
-                                        self.scroll_y,
-                                    ));
+                            if let Some(text_box) = table.rows.get(row).and_then(|r| r.get(col)) {
+                                text_areas.push(text_box.text_areas(
+                                    &mut self.text_system,
+                                    (pos.0 + node.location.x, pos.1 + node.location.y),
+                                    (node.size.width, f32::MAX),
+                                    self.zoom,
+                                    self.scroll_y,
+                                ));
 
-                                    if let Some(selection_rects) = text_box.render_selection(
+                                if let Some(selection_rects) = text_box.render_selection(
                                         &mut self.text_system,
                                         (pos.0 + node.location.x, pos.1 + node.location.y),
                                         (node.size.width, node.size.height),
                                         self.zoom,
                                         selection,
-                                    ) {
-                                        for rect in selection_rects {
-                                            self.draw_rectangle(
-                                                Rect::from_min_max(
-                                                    (rect.pos.0, rect.pos.1 - self.scroll_y),
-                                                    (rect.max().0, rect.max().1 - self.scroll_y),
-                                                ),
-                                                native_color(
-                                                    self.theme.select_color,
-                                                    &self.surface_format,
-                                                ),
-                                            )?;
-                                        }
+                                ) {
+                                    for rect in selection_rects {
+                                        self.draw_rectangle(
+                                            Rect::from_min_max(
+                                                (rect.pos.0, rect.pos.1 - self.scroll_y),
+                                                (rect.max().0, rect.max().1 - self.scroll_y),
+                                            ),
+                                            native_color(
+                                                self.theme.select_color,
+                                                &self.surface_format,
+                                            ),
+                                        )?;
                                     }
                                 }
                             }
@@ -981,7 +1067,7 @@ impl Renderer {
         elements: &mut [Positioned<Element>],
         selection: &mut Selection,
         search_active: bool,
-        search_matches: &[(usize, usize, usize)],
+        search_matches: &[(usize, usize, usize, usize)],
         current_match: Option<usize>,
         search_query: &str,
         total_matches: usize,
@@ -1004,7 +1090,7 @@ impl Renderer {
         
         // Draw search highlights with proper query for width estimation
         if search_active && !search_matches.is_empty() {
-            self.draw_search_highlights(elements, search_matches, current_match, search_query)?;
+            self.draw_search_highlights_with_tables(elements, search_matches, current_match, search_query)?;
         }
         
         // Render elements
