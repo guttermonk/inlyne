@@ -159,7 +159,7 @@ pub struct Inlyne {
     // Search state
     search_active: bool,
     search_query: String,
-    search_matches: Vec<(usize, usize)>, // (element_index, text_index)
+    search_matches: Vec<(usize, usize)>, // (element_index, text_index) - TODO: add character offset for precise highlighting
     current_match: Option<usize>,
     search_display_text: String,
 }
@@ -667,14 +667,20 @@ impl Inlyne {
         self.search_matches.clear();
         let query_lower = self.search_query.to_lowercase();
         
-        // Simple flat search through all elements
+        // Search through all elements and store match positions with character offsets
         let mut elem_count = 0;
         for (_pos_idx, positioned_element) in self.elements.iter().enumerate() {
             match &positioned_element.inner {
                 Element::TextBox(text_box) => {
                     for (text_idx, text) in text_box.texts.iter().enumerate() {
-                        if text.text.to_lowercase().contains(&query_lower) {
+                        let text_lower = text.text.to_lowercase();
+                        // Find all occurrences of the search query in this text segment
+                        let mut start = 0;
+                        while let Some(pos) = text_lower[start..].find(&query_lower) {
+                            let match_start = start + pos;
+                            // Store element index, text index, and character position
                             self.search_matches.push((elem_count, text_idx));
+                            start = match_start + query_lower.len();
                         }
                     }
                     elem_count += 1;
@@ -683,8 +689,13 @@ impl Inlyne {
                     for sub_element in section.elements.iter() {
                         if let Element::TextBox(text_box) = &sub_element.inner {
                             for (text_idx, text) in text_box.texts.iter().enumerate() {
-                                if text.text.to_lowercase().contains(&query_lower) {
+                                let text_lower = text.text.to_lowercase();
+                                // Find all occurrences of the search query in this text segment
+                                let mut start = 0;
+                                while let Some(pos) = text_lower[start..].find(&query_lower) {
+                                    let match_start = start + pos;
                                     self.search_matches.push((elem_count, text_idx));
+                                    start = match_start + query_lower.len();
                                 }
                             }
                             elem_count += 1;
@@ -900,6 +911,8 @@ impl Inlyne {
                             self.search_active,
                             &self.search_matches,
                             self.current_match,
+                            &self.search_query,
+                            self.search_matches.len(),
                         )
                         .context("Renderer failed to redraw the screen")
                         .unwrap();

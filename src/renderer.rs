@@ -225,30 +225,18 @@ impl Renderer {
         self.theme.scrollbar_width as f32
     }
 
-    fn render_elements(
-        &mut self,
-        elements: &[Positioned<Element>],
-        selection: &mut Selection,
-        search_matches: &[(usize, usize)],
-        current_match: Option<usize>,
-        search_active: bool,
-    ) -> anyhow::Result<Vec<CachedTextArea>> {
-        // First pass: draw highlight rectangles for all search matches
-        if search_active && !search_matches.is_empty() {
-            self.draw_search_highlights(elements, search_matches, current_match)?;
-        }
-        
-        // Second pass: render elements normally
-        self.render_elements_inner(elements, selection)
-    }
-    
     fn draw_search_highlights(
         &mut self,
         elements: &[Positioned<Element>],
         search_matches: &[(usize, usize)],
         current_match: Option<usize>,
+        search_query: &str,
     ) -> anyhow::Result<()> {
         let mut elem_idx = 0;
+        
+        // Estimate width based on search query length and average character width
+        let char_width = 8.0 * self.hidpi_scale * self.zoom; // Approximate character width
+        let estimated_match_width = (search_query.len() as f32 * char_width).max(20.0);
         
         // Iterate through all elements to find matches
         for element in elements.iter() {
@@ -258,6 +246,8 @@ impl Renderer {
                     for (match_idx, &(match_elem_idx, _text_idx)) in search_matches.iter().enumerate() {
                         if match_elem_idx == elem_idx {
                             // Draw highlight for this match
+                            // TODO: Calculate exact text position within TextBox to highlight only the matching word
+                            // For now, highlight the whole text element but with reduced width estimate
                             if let Some(bounds) = &element.bounds {
                                 let is_current = current_match == Some(match_idx);
                                 let highlight_color = if is_current {
@@ -266,10 +256,10 @@ impl Renderer {
                                     [1.0, 0.8, 0.0, 0.3] // Yellow/orange for other matches
                                 };
                                 
-                                // Draw highlight rectangle slightly larger than text bounds
+                                // Draw highlight rectangle for estimated text width
                                 let highlight_rect = Rect::new(
-                                    (bounds.pos.0 - 3.0, bounds.pos.1 - self.scroll_y - 2.0),
-                                    (bounds.size.0 + 6.0, bounds.size.1 + 4.0),
+                                    (bounds.pos.0, bounds.pos.1 - self.scroll_y),
+                                    (estimated_match_width, bounds.size.1),
                                 );
                                 self.draw_rectangle(highlight_rect, highlight_color)?;
                             }
@@ -295,8 +285,8 @@ impl Renderer {
                                         
                                         // Draw highlight rectangle
                                         let highlight_rect = Rect::new(
-                                            (bounds.pos.0 - 3.0, bounds.pos.1 - self.scroll_y - 2.0),
-                                            (bounds.size.0 + 6.0, bounds.size.1 + 4.0),
+                                            (bounds.pos.0, bounds.pos.1 - self.scroll_y),
+                                            (estimated_match_width, bounds.size.1),
                                         );
                                         self.draw_rectangle(highlight_rect, highlight_color)?;
                                     }
@@ -313,7 +303,7 @@ impl Renderer {
         Ok(())
     }
 
-    fn render_elements_inner(
+    fn render_elements(
         &mut self,
         elements: &[Positioned<Element>],
         selection: &mut Selection,
@@ -588,7 +578,7 @@ impl Renderer {
                     }
                 }
                 Element::Row(row) => {
-                    text_areas.append(&mut self.render_elements_inner(&row.elements, selection)?)
+                    text_areas.append(&mut self.render_elements(&row.elements, selection)?)
                 }
                 Element::Section(section) => {
                     if let Some(ref summary) = *section.summary {
@@ -603,11 +593,11 @@ impl Renderer {
                             *section.hidden.borrow(),
                         )?;
                         text_areas.append(
-                            &mut self.render_elements_inner(std::slice::from_ref(summary), selection)?,
+                            &mut self.render_elements(std::slice::from_ref(summary), selection)?,
                         )
                     }
                     if !*section.hidden.borrow() {
-                        text_areas.append(&mut self.render_elements_inner(&section.elements, selection)?)
+                        text_areas.append(&mut self.render_elements(&section.elements, selection)?)
                     }
                 }
             }
@@ -661,6 +651,137 @@ impl Renderer {
             }),
         )?;
         Ok(())
+    }
+
+    fn render_search_input_field(
+        &mut self,
+        search_active: bool,
+        search_query: &str,
+        current_match: Option<usize>,
+        total_matches: usize,
+    ) -> Vec<CachedTextArea> {
+        let mut text_areas = Vec::new();
+        
+        if !search_active {
+            return text_areas;
+        }
+
+        let screen_size = self.screen_size();
+        
+        // Position the search field at the top-right corner
+        let field_width = 300.0 * self.hidpi_scale;
+        let field_height = 30.0 * self.hidpi_scale;
+        let padding = 10.0 * self.hidpi_scale;
+        let field_x = screen_size.0 - field_width - padding;
+        let field_y = padding;
+        
+        // Draw semi-transparent background
+        let bg_rect = Rect::new(
+            (field_x, field_y),
+            (field_width, field_height),
+        );
+        let _ = self.draw_rectangle(bg_rect, [0.1, 0.1, 0.1, 0.9]);
+        
+        // Draw border
+        let border_color = if total_matches > 0 {
+            [0.0, 0.8, 0.0, 1.0] // Green when matches found
+        } else if !search_query.is_empty() {
+            [0.8, 0.2, 0.0, 1.0] // Red when no matches
+        } else {
+            [0.5, 0.5, 0.5, 1.0] // Gray when empty
+        };
+        
+        // Draw border as thin rectangles
+        let border_width = 2.0;
+        // Top border
+        let _ = self.draw_rectangle(
+            Rect::new((field_x, field_y), (field_width, border_width)),
+            border_color,
+        );
+        // Bottom border
+        let _ = self.draw_rectangle(
+            Rect::new((field_x, field_y + field_height - border_width), (field_width, border_width)),
+            border_color,
+        );
+        // Left border
+        let _ = self.draw_rectangle(
+            Rect::new((field_x, field_y), (border_width, field_height)),
+            border_color,
+        );
+        // Right border
+        let _ = self.draw_rectangle(
+            Rect::new((field_x + field_width - border_width, field_y), (border_width, field_height)),
+            border_color,
+        );
+        
+        // Render the search text
+        let text_to_display = if search_query.is_empty() {
+            "Type to search...".to_string()
+        } else if total_matches > 0 {
+            if let Some(current) = current_match {
+                format!("{} ({}/{})", search_query, current + 1, total_matches)
+            } else {
+                format!("{} ({} matches)", search_query, total_matches)
+            }
+        } else if !search_query.is_empty() {
+            format!("{} (no matches)", search_query)
+        } else {
+            "Type to search...".to_string()
+        };
+        
+        // Create text buffer for search field
+        use glyphon::{Attrs, Buffer, Metrics, Shaping};
+        
+        const SEARCH_FIELD_KEY: u64 = 0xFEEDFACE_DEADBEEF; // Unique key for search field text
+        
+        let key = {
+            let mut cache = self.text_system.text_cache.lock();
+            
+            // Get or create the buffer
+            if !cache.entries.contains_key(&SEARCH_FIELD_KEY) {
+                let buffer = Buffer::new(
+                    &mut self.text_system.font_system.lock(),
+                    Metrics::new(14.0 * self.hidpi_scale, 18.0 * self.hidpi_scale),
+                );
+                cache.store_search_buffer(SEARCH_FIELD_KEY, buffer);
+            }
+            
+            // Update the existing buffer with new text
+            if let Some(buffer) = cache.entries.get_mut(&SEARCH_FIELD_KEY) {
+                buffer.set_size(
+                    &mut self.text_system.font_system.lock(),
+                    field_width - padding,
+                    field_height,
+                );
+                
+                let attrs = Attrs::new()
+                    .family(glyphon::Family::SansSerif)
+                    .color(glyphon::Color::rgb(255, 255, 255));
+                
+                buffer.set_text(
+                    &mut self.text_system.font_system.lock(),
+                    &text_to_display,
+                    attrs,
+                    Shaping::Advanced,
+                );
+                
+                buffer.shape_until_scroll(&mut self.text_system.font_system.lock());
+            }
+            
+            cache.recently_used.insert(SEARCH_FIELD_KEY);
+            SEARCH_FIELD_KEY
+        };
+        
+        // Create the cached text area
+        text_areas.push(CachedTextArea::new(
+            key,
+            field_x + padding / 2.0,
+            field_y + (field_height - 14.0 * self.hidpi_scale) / 2.0,
+            glyphon::TextBounds::default(),
+            glyphon::Color::rgb(255, 255, 255),
+        ));
+        
+        text_areas
     }
 
     fn draw_rectangle(&mut self, rect: Rect, color: [f32; 4]) -> anyhow::Result<()> {
@@ -817,6 +938,8 @@ impl Renderer {
         search_active: bool,
         search_matches: &[(usize, usize)],
         current_match: Option<usize>,
+        search_query: &str,
+        total_matches: usize,
     ) -> anyhow::Result<()> {
         selection.text.clear();
         let frame = self
@@ -833,7 +956,19 @@ impl Renderer {
         // Prepare and render elements that use lyon
         self.lyon_buffer.indices.clear();
         self.lyon_buffer.vertices.clear();
-        let cached_text_areas = self.render_elements(elements, selection, search_matches, current_match, search_active)?;
+        
+        // Draw search highlights with proper query for width estimation
+        if search_active && !search_matches.is_empty() {
+            self.draw_search_highlights(elements, search_matches, current_match, search_query)?;
+        }
+        
+        // Render elements
+        let mut cached_text_areas = self.render_elements(elements, selection)?;
+        
+        // Render search input field if search is active
+        let search_field_text = self.render_search_input_field(search_active, search_query, current_match, total_matches);
+        cached_text_areas.extend(search_field_text);
+        
         let vertex_buf = self
             .device
             .create_buffer_init(&wgpu::util::BufferInitDescriptor {
