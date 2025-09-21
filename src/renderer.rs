@@ -229,9 +229,98 @@ impl Renderer {
         &mut self,
         elements: &[Positioned<Element>],
         selection: &mut Selection,
+        search_matches: &[(usize, usize)],
+        current_match: Option<usize>,
+        search_active: bool,
+    ) -> anyhow::Result<Vec<CachedTextArea>> {
+        // First pass: draw highlight rectangles for all search matches
+        if search_active && !search_matches.is_empty() {
+            self.draw_search_highlights(elements, search_matches, current_match)?;
+        }
+        
+        // Second pass: render elements normally
+        self.render_elements_inner(elements, selection)
+    }
+    
+    fn draw_search_highlights(
+        &mut self,
+        elements: &[Positioned<Element>],
+        search_matches: &[(usize, usize)],
+        current_match: Option<usize>,
+    ) -> anyhow::Result<()> {
+        let mut elem_idx = 0;
+        
+        // Iterate through all elements to find matches
+        for element in elements.iter() {
+            match &element.inner {
+                Element::TextBox(_) => {
+                    // Check if this element index has any matches
+                    for (match_idx, &(match_elem_idx, _text_idx)) in search_matches.iter().enumerate() {
+                        if match_elem_idx == elem_idx {
+                            // Draw highlight for this match
+                            if let Some(bounds) = &element.bounds {
+                                let is_current = current_match == Some(match_idx);
+                                let highlight_color = if is_current {
+                                    [0.0, 1.0, 0.0, 0.4] // Bright green for current match
+                                } else {
+                                    [1.0, 0.8, 0.0, 0.3] // Yellow/orange for other matches
+                                };
+                                
+                                // Draw highlight rectangle slightly larger than text bounds
+                                let highlight_rect = Rect::new(
+                                    (bounds.pos.0 - 3.0, bounds.pos.1 - self.scroll_y - 2.0),
+                                    (bounds.size.0 + 6.0, bounds.size.1 + 4.0),
+                                );
+                                self.draw_rectangle(highlight_rect, highlight_color)?;
+                            }
+                        }
+                    }
+                    elem_idx += 1;
+                }
+                Element::Section(section) => {
+                    // Recursively count TextBox elements in sections
+                    for sub_element in section.elements.iter() {
+                        if let Element::TextBox(_) = &sub_element.inner {
+                            // Check if this element index has any matches
+                            for (match_idx, &(match_elem_idx, _text_idx)) in search_matches.iter().enumerate() {
+                                if match_elem_idx == elem_idx {
+                                    // Draw highlight for this match
+                                    if let Some(bounds) = &sub_element.bounds {
+                                        let is_current = current_match == Some(match_idx);
+                                        let highlight_color = if is_current {
+                                            [0.0, 1.0, 0.0, 0.4] // Bright green for current match
+                                        } else {
+                                            [1.0, 0.8, 0.0, 0.3] // Yellow/orange for other matches
+                                        };
+                                        
+                                        // Draw highlight rectangle
+                                        let highlight_rect = Rect::new(
+                                            (bounds.pos.0 - 3.0, bounds.pos.1 - self.scroll_y - 2.0),
+                                            (bounds.size.0 + 6.0, bounds.size.1 + 4.0),
+                                        );
+                                        self.draw_rectangle(highlight_rect, highlight_color)?;
+                                    }
+                                }
+                            }
+                            elem_idx += 1;
+                        }
+                    }
+                }
+                _ => {}
+            }
+        }
+        
+        Ok(())
+    }
+
+    fn render_elements_inner(
+        &mut self,
+        elements: &[Positioned<Element>],
+        selection: &mut Selection,
     ) -> anyhow::Result<Vec<CachedTextArea>> {
         let mut text_areas: Vec<CachedTextArea> = Vec::new();
         let screen_size = self.screen_size();
+        
         for element in elements.iter() {
             let Rect { mut pos, size } =
                 element.bounds.as_ref().context("Element not positioned")?;
@@ -499,7 +588,7 @@ impl Renderer {
                     }
                 }
                 Element::Row(row) => {
-                    text_areas.append(&mut self.render_elements(&row.elements, selection)?)
+                    text_areas.append(&mut self.render_elements_inner(&row.elements, selection)?)
                 }
                 Element::Section(section) => {
                     if let Some(ref summary) = *section.summary {
@@ -514,11 +603,11 @@ impl Renderer {
                             *section.hidden.borrow(),
                         )?;
                         text_areas.append(
-                            &mut self.render_elements(std::slice::from_ref(summary), selection)?,
+                            &mut self.render_elements_inner(std::slice::from_ref(summary), selection)?,
                         )
                     }
                     if !*section.hidden.borrow() {
-                        text_areas.append(&mut self.render_elements(&section.elements, selection)?)
+                        text_areas.append(&mut self.render_elements_inner(&section.elements, selection)?)
                     }
                 }
             }
@@ -572,302 +661,6 @@ impl Renderer {
             }),
         )?;
         Ok(())
-    }
-
-    fn prepare_search_ui(
-        &mut self,
-        search_active: bool,
-        search_query: &str,
-        current_match: Option<usize>,
-        total_matches: usize,
-    ) -> Vec<CachedTextArea> {
-        let mut text_areas = Vec::new();
-        
-        if !search_active {
-            return text_areas;
-        }
-
-        let screen_size = self.screen_size();
-        let search_bar_height = 40.0 * self.hidpi_scale;
-        
-        // Prepare search bar background rectangle
-        let search_bar_rect = Rect::new(
-            (0.0, screen_size.1 - search_bar_height),
-            (screen_size.0, search_bar_height),
-        );
-        
-        // Add search bar background to lyon buffer
-        let min = point(search_bar_rect.pos.0, search_bar_rect.pos.1, screen_size);
-        let max = point(search_bar_rect.max().0, search_bar_rect.max().1, screen_size);
-        let color = [0.1, 0.1, 0.1, 0.9];
-        self.lyon_buffer.vertices.push(Vertex {
-            pos: [min[0], min[1], 0.0],
-            color,
-        });
-        self.lyon_buffer.vertices.push(Vertex {
-            pos: [max[0], min[1], 0.0],
-            color,
-        });
-        self.lyon_buffer.vertices.push(Vertex {
-            pos: [max[0], max[1], 0.0],
-            color,
-        });
-        self.lyon_buffer.vertices.push(Vertex {
-            pos: [min[0], max[1], 0.0],
-            color,
-        });
-        let base = self.lyon_buffer.vertices.len() as u16 - 4;
-        self.lyon_buffer.indices.extend_from_slice(&[
-            base,
-            base + 1,
-            base + 2,
-            base,
-            base + 2,
-            base + 3,
-        ]);
-        
-        // Add border line
-        let border_rect = Rect::new(
-            (0.0, screen_size.1 - search_bar_height - 1.0),
-            (screen_size.0, 1.0),
-        );
-        let border_color = [0.3, 0.3, 0.3, 1.0];
-        let border_min = point(border_rect.pos.0, border_rect.pos.1, screen_size);
-        let border_max = point(border_rect.max().0, border_rect.max().1, screen_size);
-        self.lyon_buffer.vertices.push(Vertex {
-            pos: [border_min[0], border_min[1], 0.0],
-            color: border_color,
-        });
-        self.lyon_buffer.vertices.push(Vertex {
-            pos: [border_max[0], border_min[1], 0.0],
-            color: border_color,
-        });
-        self.lyon_buffer.vertices.push(Vertex {
-            pos: [border_max[0], border_max[1], 0.0],
-            color: border_color,
-        });
-        self.lyon_buffer.vertices.push(Vertex {
-            pos: [border_min[0], border_max[1], 0.0],
-            color: border_color,
-        });
-        let border_base = self.lyon_buffer.vertices.len() as u16 - 4;
-        self.lyon_buffer.indices.extend_from_slice(&[
-            border_base,
-            border_base + 1,
-            border_base + 2,
-            border_base,
-            border_base + 2,
-            border_base + 3,
-        ]);
-        
-        // Draw search status indicators
-        let text_padding = 10.0 * self.hidpi_scale;
-        let indicator_height = 20.0 * self.hidpi_scale;
-        let indicator_y = screen_size.1 - search_bar_height / 2.0 - indicator_height / 2.0;
-        
-        // Draw search status bar based on query state
-        if !search_query.is_empty() {
-            // Calculate width based on approximate text length
-            let text_width = search_query.len() as f32 * 8.0 * self.hidpi_scale;
-            let indicator_width = text_width.min(screen_size.0 - text_padding * 2.0);
-            
-            // Choose color based on search results
-            let indicator_color = if total_matches > 0 {
-                [0.0, 0.8, 0.0, 0.9] // Green for matches found
-            } else {
-                [0.8, 0.2, 0.0, 0.9] // Red-orange for no matches
-            };
-            
-            // Draw status bar
-            let indicator_rect = Rect::new(
-                (text_padding, indicator_y),
-                (indicator_width, indicator_height),
-            );
-            
-            let min = point(indicator_rect.pos.0, indicator_rect.pos.1, screen_size);
-            let max = point(indicator_rect.max().0, indicator_rect.max().1, screen_size);
-            self.lyon_buffer.vertices.push(Vertex {
-                pos: [min[0], min[1], 0.0],
-                color: indicator_color,
-            });
-            self.lyon_buffer.vertices.push(Vertex {
-                pos: [max[0], min[1], 0.0],
-                color: indicator_color,
-            });
-            self.lyon_buffer.vertices.push(Vertex {
-                pos: [max[0], max[1], 0.0],
-                color: indicator_color,
-            });
-            self.lyon_buffer.vertices.push(Vertex {
-                pos: [min[0], max[1], 0.0],
-                color: indicator_color,
-            });
-            let indicator_base = self.lyon_buffer.vertices.len() as u16 - 4;
-            self.lyon_buffer.indices.extend_from_slice(&[
-                indicator_base,
-                indicator_base + 1,
-                indicator_base + 2,
-                indicator_base,
-                indicator_base + 2,
-                indicator_base + 3,
-            ]);
-            
-            // Draw match counter indicator on the right side
-            if total_matches > 0 && current_match.is_some() {
-                let counter_text = format!("{}/{}", current_match.unwrap() + 1, total_matches);
-                let counter_width = counter_text.len() as f32 * 8.0 * self.hidpi_scale;
-                let counter_x = screen_size.0 - text_padding - counter_width - 20.0 * self.hidpi_scale;
-                
-                // Draw background for counter
-                let counter_rect = Rect::new(
-                    (counter_x, indicator_y),
-                    (counter_width + 20.0 * self.hidpi_scale, indicator_height),
-                );
-                
-                let counter_color = [0.2, 0.2, 0.2, 0.8];
-                let min = point(counter_rect.pos.0, counter_rect.pos.1, screen_size);
-                let max = point(counter_rect.max().0, counter_rect.max().1, screen_size);
-                
-                self.lyon_buffer.vertices.push(Vertex {
-                    pos: [min[0], min[1], 0.0],
-                    color: counter_color,
-                });
-                self.lyon_buffer.vertices.push(Vertex {
-                    pos: [max[0], min[1], 0.0],
-                    color: counter_color,
-                });
-                self.lyon_buffer.vertices.push(Vertex {
-                    pos: [max[0], max[1], 0.0],
-                    color: counter_color,
-                });
-                self.lyon_buffer.vertices.push(Vertex {
-                    pos: [min[0], max[1], 0.0],
-                    color: counter_color,
-                });
-                
-                let counter_base = self.lyon_buffer.vertices.len() as u16 - 4;
-                self.lyon_buffer.indices.extend_from_slice(&[
-                    counter_base,
-                    counter_base + 1,
-                    counter_base + 2,
-                    counter_base,
-                    counter_base + 2,
-                    counter_base + 3,
-                ]);
-            }
-        } else if search_active {
-            // Draw placeholder indicator when search is active but no query yet
-            let placeholder_rect = Rect::new(
-                (text_padding, indicator_y),
-                (100.0 * self.hidpi_scale, 2.0 * self.hidpi_scale),
-            );
-            
-            let placeholder_color = [0.5, 0.5, 0.5, 0.5];
-            let min = point(placeholder_rect.pos.0, placeholder_rect.pos.1, screen_size);
-            let max = point(placeholder_rect.max().0, placeholder_rect.max().1, screen_size);
-            
-            self.lyon_buffer.vertices.push(Vertex {
-                pos: [min[0], min[1], 0.0],
-                color: placeholder_color,
-            });
-            self.lyon_buffer.vertices.push(Vertex {
-                pos: [max[0], min[1], 0.0],
-                color: placeholder_color,
-            });
-            self.lyon_buffer.vertices.push(Vertex {
-                pos: [max[0], max[1], 0.0],
-                color: placeholder_color,
-            });
-            self.lyon_buffer.vertices.push(Vertex {
-                pos: [min[0], max[1], 0.0],
-                color: placeholder_color,
-            });
-            
-            let placeholder_base = self.lyon_buffer.vertices.len() as u16 - 4;
-            self.lyon_buffer.indices.extend_from_slice(&[
-                placeholder_base,
-                placeholder_base + 1,
-                placeholder_base + 2,
-                placeholder_base,
-                placeholder_base + 2,
-                placeholder_base + 3,
-            ]);
-        }
-        
-        // Render search text using glyphon text rendering
-        let text_padding = 10.0 * self.hidpi_scale;
-        let text_y = screen_size.1 - search_bar_height + text_padding;
-        
-        // Build the search text to display
-        let display_text = if search_query.is_empty() {
-            "Type to search...".to_string()
-        } else if total_matches > 0 {
-            if let Some(current) = current_match {
-                format!("Search: {} ({}/{})", search_query, current + 1, total_matches)
-            } else {
-                format!("Search: {} ({} matches)", search_query, total_matches)
-            }
-        } else if !search_query.is_empty() {
-            format!("Search: {} (No matches)", search_query)
-        } else {
-            "Type to search...".to_string()
-        };
-        
-        // Create or update the search text buffer
-        use glyphon::{Attrs, Buffer, Metrics, Shaping};
-        
-        // Use a fixed key for the search UI buffer
-        const SEARCH_UI_KEY: u64 = 0xDEADBEEF_CAFEBABE; // Unique fixed key for search UI
-        
-        let key = {
-            let mut cache = self.text_system.text_cache.lock();
-            
-            // Get or create the buffer
-            if !cache.entries.contains_key(&SEARCH_UI_KEY) {
-                // Create new buffer if it doesn't exist
-                let buffer = Buffer::new(
-                    &mut self.text_system.font_system.lock(),
-                    Metrics::new(16.0 * self.hidpi_scale, 20.0 * self.hidpi_scale),
-                );
-                cache.store_search_buffer(SEARCH_UI_KEY, buffer);
-            }
-            
-            // Update the existing buffer with new text
-            if let Some(buffer) = cache.entries.get_mut(&SEARCH_UI_KEY) {
-                buffer.set_size(
-                    &mut self.text_system.font_system.lock(),
-                    screen_size.0 - (text_padding * 2.0),
-                    search_bar_height,
-                );
-                
-                let attrs = Attrs::new()
-                    .family(glyphon::Family::SansSerif)
-                    .color(glyphon::Color::rgb(255, 255, 255));
-                
-                buffer.set_text(
-                    &mut self.text_system.font_system.lock(),
-                    &display_text,
-                    attrs,
-                    Shaping::Advanced,
-                );
-                
-                buffer.shape_until_scroll(&mut self.text_system.font_system.lock());
-            }
-            
-            cache.recently_used.insert(SEARCH_UI_KEY);
-            SEARCH_UI_KEY
-        };
-        
-        // Create the cached text area
-        text_areas.push(CachedTextArea::new(
-            key,
-            text_padding,
-            text_y,
-            glyphon::TextBounds::default(),
-            glyphon::Color::rgb(255, 255, 255),
-        ));
-        
-        text_areas
     }
 
     fn draw_rectangle(&mut self, rect: Rect, color: [f32; 4]) -> anyhow::Result<()> {
@@ -1022,9 +815,8 @@ impl Renderer {
         elements: &mut [Positioned<Element>],
         selection: &mut Selection,
         search_active: bool,
-        search_query: &str,
+        search_matches: &[(usize, usize)],
         current_match: Option<usize>,
-        total_matches: usize,
     ) -> anyhow::Result<()> {
         selection.text.clear();
         let frame = self
@@ -1041,11 +833,7 @@ impl Renderer {
         // Prepare and render elements that use lyon
         self.lyon_buffer.indices.clear();
         self.lyon_buffer.vertices.clear();
-        let mut cached_text_areas = self.render_elements(elements, selection)?;
-        
-        // Add search UI to lyon buffer and text areas if active
-        let search_text_areas = self.prepare_search_ui(search_active, search_query, current_match, total_matches);
-        cached_text_areas.extend(search_text_areas);
+        let cached_text_areas = self.render_elements(elements, selection, search_matches, current_match, search_active)?;
         let vertex_buf = self
             .device
             .create_buffer_init(&wgpu::util::BufferInitDescriptor {

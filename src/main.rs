@@ -607,7 +607,7 @@ impl Inlyne {
             self.search_display_text = "Type to search...".to_string();
             
             // Update window title to show search mode
-            self.window.set_title(&format!("[SEARCH MODE] {}", self.search_display_text));
+            self.window.set_title(&format!("[SEARCH MODE] Type to search..."));
         } else {
             tracing::info!("Search deactivated");
             self.search_display_text.clear();
@@ -643,16 +643,13 @@ impl Inlyne {
             self.search_query.push(c);
         }
         
-        // Update display text
+        // Update display text and window title
         if self.search_query.is_empty() {
             self.search_display_text = "Type to search...".to_string();
+            self.window.set_title("[SEARCH MODE] Type to search...");
         } else {
-            self.search_display_text = format!("Search: {}", self.search_query);
-        }
-        
-        // Update window title to show current search query
-        if self.search_active {
-            self.window.set_title(&format!("[SEARCH] {}", self.search_display_text));
+            self.search_display_text = self.search_query.clone();
+            self.window.set_title(&format!("[SEARCH] {}", self.search_query));
         }
         
         // Perform search with updated query
@@ -703,12 +700,12 @@ impl Inlyne {
             self.current_match = Some(0);
             self.jump_to_current_match();
             // Update display with match count
-            self.search_display_text = format!("Search: {} ({}/{})", 
+            self.search_display_text = format!("{} ({}/{})", 
                 self.search_query, 1, self.search_matches.len());
         } else {
             self.current_match = None;
             if !self.search_query.is_empty() {
-                self.search_display_text = format!("Search: {} (0 matches)", self.search_query);
+                self.search_display_text = format!("{} (No matches)", self.search_query);
             }
         }
         
@@ -730,7 +727,7 @@ impl Inlyne {
         
         self.jump_to_current_match();
         // Update display with current match
-        self.search_display_text = format!("Search: {} ({}/{})", 
+        self.search_display_text = format!("{} ({}/{})", 
             self.search_query, self.current_match.unwrap_or(0) + 1, self.search_matches.len());
         // Update window title
         self.window.set_title(&format!("[SEARCH] {}", self.search_display_text));
@@ -750,7 +747,7 @@ impl Inlyne {
         
         self.jump_to_current_match();
         // Update display with current match
-        self.search_display_text = format!("Search: {} ({}/{})", 
+        self.search_display_text = format!("{} ({}/{})", 
             self.search_query, self.current_match.unwrap_or(0) + 1, self.search_matches.len());
         // Update window title
         self.window.set_title(&format!("[SEARCH] {}", self.search_display_text));
@@ -901,9 +898,8 @@ impl Inlyne {
                             elements_to_render, 
                             &mut self.selection,
                             self.search_active,
-                            &self.search_display_text,
+                            &self.search_matches,
                             self.current_match,
-                            self.search_matches.len(),
                         )
                         .context("Renderer failed to redraw the screen")
                         .unwrap();
