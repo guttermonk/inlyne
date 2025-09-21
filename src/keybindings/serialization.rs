@@ -28,6 +28,9 @@ impl<'de> Deserialize<'de> for Action {
             ZoomReset,
             Copy,
             Help,
+            Search,
+            NextMatch,
+            PrevMatch,
             Quit,
         }
 
@@ -45,6 +48,9 @@ impl<'de> Deserialize<'de> for Action {
             FlatAction::ZoomReset => Action::Zoom(Zoom::Reset),
             FlatAction::Copy => Action::Copy,
             FlatAction::Help => Action::Help,
+            FlatAction::Search => Action::Search,
+            FlatAction::NextMatch => Action::NextMatch,
+            FlatAction::PrevMatch => Action::PrevMatch,
             FlatAction::Quit => Action::Quit,
         };
 

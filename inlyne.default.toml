@@ -126,6 +126,7 @@ code-highlighter = "github"
 #     "ZoomIn", "ZoomOut", "ZoomReset",
 #     "Copy",
 #     "Help",
+#     "Search", "NextMatch", "PrevMatch",
 #     "Quit",
 # ]
 # Possible Keys: [
