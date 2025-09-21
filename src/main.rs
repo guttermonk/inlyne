@@ -432,7 +432,6 @@ impl Inlyne {
                     if found_table_without_caption {
                         for k in (i + 1)..table_idx {
                             elements_to_remove.push(k);
-                            tracing::warn!("Removing element {} between header {} and table {}", k, i, table_idx);
                         }
                     }
                 }
@@ -444,29 +443,12 @@ impl Inlyne {
             elements_vec.remove(idx);
         }
         
-        tracing::info!("Removed {} elements between headers and tables", elements_to_remove.len());
-        
         // SECOND: Position remaining elements normally
         // We need to check ahead before consuming elements, so we'll iterate while checking first
         while !elements_vec.is_empty() {
             // Now remove and position the element
             let element = elements_vec.remove(0);
             let mut positioned_element = Positioned::new(element);
-            
-            // Log element type and current reserved_height
-            let element_type = match &positioned_element.inner {
-                Element::TextBox(tb) if tb.is_header => "HEADER",
-                Element::TextBox(_) => "TextBox",
-                Element::Table(_) => "TABLE",
-                Element::Spacer(_) => "Spacer",
-                Element::Image(_) => "Image",
-                Element::Row(_) => "Row",
-                Element::Section(_) => "Section",
-            };
-            
-            let reserved_before = renderer.positioner.reserved_height;
-            tracing::info!("Positioning element ({}). Reserved height BEFORE: {:.2}px", 
-                         element_type, reserved_before);
             
             // Ensure minimum 12px spacing before headers (except at document start)
             if matches!(&positioned_element.inner, Element::TextBox(tb) if tb.is_header) {
@@ -477,7 +459,6 @@ impl Inlyne {
                     
                     // Add spacing to ensure header has breathing room
                     renderer.positioner.reserved_height = last_element_bottom + min_spacing;
-                    tracing::info!("  Ensured {:.2}px minimum (12px base) spacing before header", min_spacing);
                 }
             }
             
@@ -494,10 +475,6 @@ impl Inlyne {
             
             let element_bounds = positioned_element.bounds.as_ref().unwrap();
             let element_height = element_bounds.size.1;
-            let element_y = element_bounds.pos.1;
-            
-            tracing::info!("  Element positioned at Y={:.2}px, height={:.2}px, bottom={:.2}px", 
-                         element_y, element_height, element_y + element_height);
             
             renderer.positioner.reserved_height += element_height;
             
@@ -507,9 +484,7 @@ impl Inlyne {
                     // Headers always get at least 2px padding after them
                     let min_header_padding = 2.0 * renderer.hidpi_scale * renderer.zoom;
                     let normal_padding = renderer.element_padding * renderer.hidpi_scale * renderer.zoom;
-                    let padding = normal_padding.max(min_header_padding);
-                    tracing::info!("  Header gets {:.2}px padding after it (min 2px)", padding);
-                    padding
+                    normal_padding.max(min_header_padding)
                 } else {
                     // Normal padding for non-header text
                     renderer.element_padding * renderer.hidpi_scale * renderer.zoom
@@ -518,9 +493,7 @@ impl Inlyne {
                 // Tables always get at least 6px padding for consistency
                 let min_table_padding = 6.0 * renderer.hidpi_scale * renderer.zoom;
                 let normal_padding = renderer.element_padding * renderer.hidpi_scale * renderer.zoom;
-                let padding = normal_padding.max(min_table_padding);
-                tracing::info!("  Table gets {:.2}px padding after it", padding);
-                padding
+                normal_padding.max(min_table_padding)
             } else {
                 // Normal padding for other elements
                 renderer.element_padding * renderer.hidpi_scale * renderer.zoom
@@ -528,8 +501,6 @@ impl Inlyne {
             
             if padding > 0.0 {
                 renderer.positioner.reserved_height += padding;
-                tracing::info!("  Added padding: {:.2}px. New reserved height: {:.2}px", 
-                            padding, renderer.positioner.reserved_height);
             }
             
             elements.push(positioned_element);
