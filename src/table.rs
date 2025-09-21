@@ -128,6 +128,10 @@ impl Table {
                 width: points(bounds.0),
                 height: auto(),
             },
+            gap: TaffySize {
+                width: points(0.),
+                height: points(10.), // Add spacing between caption and table
+            },
             justify_content: Some(JustifyContent::Start),
             ..default()
         };
@@ -176,17 +180,17 @@ impl Table {
 
         let grid = taffy.new_with_children(grid_style, &flattened_nodes)?;
         
-        // Only create root container if we have a caption
-        let (layout_root, caption_node_ref) = if let Some(caption_node) = caption_node {
+        // Track if we need to adjust cell positions due to flex container
+        let (layout_root, caption_node_ref, grid_offset) = if let Some(caption_node) = caption_node {
             // Create flex container for caption + grid
             let mut root_children = Vec::new();
             root_children.push(caption_node);
             root_children.push(grid);
             let root = taffy.new_with_children(root_style, &root_children)?;
-            (root, Some(caption_node))
+            (root, Some(caption_node), true)
         } else {
             // No caption - use grid directly without wrapper
-            (grid, None)
+            (grid, None, false)
         };
 
         taffy.compute_layout(
@@ -197,9 +201,26 @@ impl Table {
             },
         )?;
 
+        // Get grid's position within flex container (if we have one)
+        let grid_layout_offset = if grid_offset {
+            // The grid is the second child of the flex container
+            let grid_in_flex = *taffy.layout(grid)?;
+            grid_in_flex.location.y
+        } else {
+            0.0
+        };
+
+        // Get cell layouts and adjust their Y position if needed
         let rows_layout: Vec<Vec<Layout>> = nodes
             .into_iter()
-            .map(|row| row.iter().map(|n| *taffy.layout(*n).unwrap()).collect())
+            .map(|row| {
+                row.iter().map(|n| {
+                    let mut layout = *taffy.layout(*n).unwrap();
+                    // Add the grid's offset within the flex container
+                    layout.location.y += grid_layout_offset;
+                    layout
+                }).collect()
+            })
             .collect();
         
         let caption_layout = if let Some(caption_node_ref) = caption_node_ref {
