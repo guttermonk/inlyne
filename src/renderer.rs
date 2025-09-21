@@ -599,19 +599,19 @@ impl Renderer {
         let max = point(search_bar_rect.max().0, search_bar_rect.max().1, screen_size);
         let color = [0.1, 0.1, 0.1, 0.9];
         self.lyon_buffer.vertices.push(Vertex {
-            position: [min.0, min.1],
+            position: [min[0], min[1]],
             color,
         });
         self.lyon_buffer.vertices.push(Vertex {
-            position: [max.0, min.1],
+            position: [max[0], min[1]],
             color,
         });
         self.lyon_buffer.vertices.push(Vertex {
-            position: [max.0, max.1],
+            position: [max[0], max[1]],
             color,
         });
         self.lyon_buffer.vertices.push(Vertex {
-            position: [min.0, max.1],
+            position: [min[0], max[1]],
             color,
         });
         let base = self.lyon_buffer.vertices.len() as u16 - 4;
@@ -633,19 +633,19 @@ impl Renderer {
         let border_min = point(border_rect.pos.0, border_rect.pos.1, screen_size);
         let border_max = point(border_rect.max().0, border_rect.max().1, screen_size);
         self.lyon_buffer.vertices.push(Vertex {
-            position: [border_min.0, border_min.1],
+            position: [border_min[0], border_min[1]],
             color: border_color,
         });
         self.lyon_buffer.vertices.push(Vertex {
-            position: [border_max.0, border_min.1],
+            position: [border_max[0], border_min[1]],
             color: border_color,
         });
         self.lyon_buffer.vertices.push(Vertex {
-            position: [border_max.0, border_max.1],
+            position: [border_max[0], border_max[1]],
             color: border_color,
         });
         self.lyon_buffer.vertices.push(Vertex {
-            position: [border_min.0, border_max.1],
+            position: [border_min[0], border_max[1]],
             color: border_color,
         });
         let border_base = self.lyon_buffer.vertices.len() as u16 - 4;
