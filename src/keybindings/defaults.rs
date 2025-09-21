@@ -99,6 +99,22 @@ pub fn defaults() -> Vec<(Action, KeyCombo)> {
             Action::Search,
             KeyCombo(vec![ModifiedKey(Key::from(VirtKey::F), ctrl_or_command)]),
         ),
+        // Next match: n (when searching)
+        (Action::NextMatch, KeyCombo::from(VirtKey::N)),
+        // Next match: Enter (when searching)
+        (Action::NextMatch, KeyCombo::from(VirtKey::Return)),
+        // Next match: Tab (when searching)
+        (Action::NextMatch, KeyCombo::from(VirtKey::Tab)),
+        // Previous match: Shift+n (when searching)
+        (
+            Action::PrevMatch,
+            KeyCombo(vec![ModifiedKey(Key::from(VirtKey::N), ModifiersState::SHIFT)]),
+        ),
+        // Previous match: Shift+Tab (when searching)
+        (
+            Action::PrevMatch,
+            KeyCombo(vec![ModifiedKey(Key::from(VirtKey::Tab), ModifiersState::SHIFT)]),
+        ),
         // vim-like bindings
         // Help: h
         (Action::Help, KeyCombo::from(VirtKey::H)),

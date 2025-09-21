@@ -290,6 +290,8 @@ impl Inlyne {
                 Action::Help => "Toggle Help",
                 Action::Search => "Toggle Search",
                 Action::CancelSearch => "Cancel Search",
+                Action::NextMatch => "Next Search Match",
+                Action::PrevMatch => "Previous Search Match",
                 Action::Quit => "Quit",
             };
             
@@ -1025,15 +1027,12 @@ impl Inlyne {
                     WindowEvent::ReceivedCharacter(c) => {
                         if self.search_active {
                             // Handle character input for search
-                            if c == '\r' || c == '\n' {
-                                // Enter key - go to next match
-                                self.next_match();
-                            } else if c == '\x1b' {
+                            if c == '\x1b' {
                                 // Escape key - cancel search
                                 self.cancel_search();
-                            } else if c == '\t' {
-                                // Tab handled in KeyboardInput event
-                                // Skip tab character in text input
+                            } else if c == '\r' || c == '\n' || c == '\t' {
+                                // Enter, newline, and tab are handled in KeyboardInput event
+                                // Skip these characters in text input
                             } else {
                                 // Regular character or backspace
                                 self.update_search_query(c);
@@ -1059,35 +1058,6 @@ impl Inlyne {
                             },
                         ..
                     } => {
-                        // Handle search-specific keyboard shortcuts
-                        if self.search_active {
-                            if let Some(vk) = virtual_keycode {
-                                match vk {
-                                    VirtualKeyCode::Tab => {
-                                        if modifiers.shift() {
-                                            self.prev_match();
-                                        } else {
-                                            self.next_match();
-                                        }
-                                        return;
-                                    }
-                                    VirtualKeyCode::N => {
-                                        if modifiers.shift() {
-                                            self.prev_match();
-                                        } else {
-                                            self.next_match();
-                                        }
-                                        return;
-                                    }
-                                    VirtualKeyCode::Escape => {
-                                        self.cancel_search();
-                                        return;
-                                    }
-                                    _ => {}
-                                }
-                            }
-                        }
-                        
                         let key = Key::new(virtual_keycode, scancode);
                         let modified_key = ModifiedKey(key, modifiers);
                         if let Some(action) = self.keycombos.munch(modified_key) {
@@ -1159,6 +1129,16 @@ impl Inlyne {
                                 }
                                 Action::CancelSearch => {
                                     self.cancel_search();
+                                }
+                                Action::NextMatch => {
+                                    if self.search_active {
+                                        self.next_match();
+                                    }
+                                }
+                                Action::PrevMatch => {
+                                    if self.search_active {
+                                        self.prev_match();
+                                    }
                                 }
                                 Action::Quit => {
                                     if self.search_active {
