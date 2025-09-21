@@ -449,32 +449,6 @@ impl Inlyne {
         // SECOND: Position remaining elements normally
         // We need to check ahead before consuming elements, so we'll iterate while checking first
         while !elements_vec.is_empty() {
-            // Check if current element is a header followed by a table without caption
-            let is_header_before_table = if elements_vec.len() >= 2 {
-                if let Element::TextBox(ref tb) = elements_vec[0] {
-                    if tb.is_header {
-                        // Check if next element is a table without caption
-                        if let Element::Table(ref table) = elements_vec[1] {
-                            let no_caption = table.caption.as_ref()
-                                .map(|c| c.texts.is_empty() || c.texts.iter().all(|t| t.text.trim().is_empty()))
-                                .unwrap_or(true);
-                            if no_caption {
-                                tracing::warn!(">>> HEADER BEFORE TABLE WITHOUT CAPTION DETECTED! <<<");
-                            }
-                            no_caption
-                        } else {
-                            false
-                        }
-                    } else {
-                        false
-                    }
-                } else {
-                    false
-                }
-            } else {
-                false
-            };
-            
             // Now remove and position the element
             let element = elements_vec.remove(0);
             let mut positioned_element = Positioned::new(element);
@@ -494,16 +468,16 @@ impl Inlyne {
             tracing::info!("Positioning element ({}). Reserved height BEFORE: {:.2}px", 
                          element_type, reserved_before);
             
-            // Ensure minimum 6px spacing before headers (except at document start)
+            // Ensure minimum 12px spacing before headers (except at document start)
             if matches!(&positioned_element.inner, Element::TextBox(tb) if tb.is_header) {
                 if renderer.positioner.reserved_height > renderer.element_padding * renderer.hidpi_scale {
                     // Not at document start, ensure minimum spacing
-                    let min_spacing = 6.0 * renderer.hidpi_scale * renderer.zoom;
+                    let min_spacing = 12.0 * renderer.hidpi_scale * renderer.zoom;
                     let last_element_bottom = renderer.positioner.reserved_height;
                     
                     // Add spacing to ensure header has breathing room
                     renderer.positioner.reserved_height = last_element_bottom + min_spacing;
-                    tracing::info!("  Ensured {:.2}px minimum spacing before header", min_spacing);
+                    tracing::info!("  Ensured {:.2}px minimum (12px base) spacing before header", min_spacing);
                 }
             }
             
@@ -527,11 +501,19 @@ impl Inlyne {
             
             renderer.positioner.reserved_height += element_height;
             
-            // Determine padding based on element type and what follows
-            let padding = if is_header_before_table {
-                // Skip padding after header when followed by table without caption
-                tracing::warn!("  >>> SKIPPED PADDING after header before table! <<<");
-                0.0
+            // Determine padding based on element type
+            let padding = if let Element::TextBox(ref tb) = positioned_element.inner {
+                if tb.is_header {
+                    // Headers always get at least 2px padding after them
+                    let min_header_padding = 2.0 * renderer.hidpi_scale * renderer.zoom;
+                    let normal_padding = renderer.element_padding * renderer.hidpi_scale * renderer.zoom;
+                    let padding = normal_padding.max(min_header_padding);
+                    tracing::info!("  Header gets {:.2}px padding after it (min 2px)", padding);
+                    padding
+                } else {
+                    // Normal padding for non-header text
+                    renderer.element_padding * renderer.hidpi_scale * renderer.zoom
+                }
             } else if matches!(&positioned_element.inner, Element::Table(_)) {
                 // Tables always get at least 6px padding for consistency
                 let min_table_padding = 6.0 * renderer.hidpi_scale * renderer.zoom;

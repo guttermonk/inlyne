@@ -227,11 +227,11 @@ impl Positioner {
         let mut last_element_bottom: Option<f32> = None;
 
         for i in 0..elements.len() {
-            // Ensure minimum 6px spacing before headers (except at document start)
+            // Ensure minimum 12px spacing before headers (except at document start)
             if matches!(&elements[i].inner, Element::TextBox(tb) if tb.is_header) {
                 if let Some(last_bottom) = last_element_bottom {
-                    // Ensure at least 6px gap from previous element to this header
-                    let min_spacing = 6.0 * self.hidpi_scale * zoom;
+                    // Ensure at least 12px gap from previous element to this header
+                    let min_spacing = 12.0 * self.hidpi_scale * zoom;
                     let current_gap = self.reserved_height - last_bottom;
                     
                     if current_gap < min_spacing {
@@ -254,24 +254,12 @@ impl Positioner {
             self.reserved_height = element_bottom;
             last_element_bottom = Some(element_bottom);
             
-            // Determine padding based on element type and what follows
+            // Determine padding based on element type
             let padding = if matches!(&elements[i].inner, Element::TextBox(text_box) if text_box.is_header) {
-                // Check if header is followed by table without caption
-                if i + 1 < elements.len() {
-                    if matches!(&elements[i + 1].inner, Element::Table(table)
-                        if table.caption.as_ref()
-                            .map(|c| c.texts.is_empty() || c.texts.iter().all(|t| t.text.trim().is_empty()))
-                            .unwrap_or(true)) {
-                        // Skip padding after header before table without caption
-                        0.0
-                    } else {
-                        // Normal padding after header
-                        element_padding * self.hidpi_scale * zoom
-                    }
-                } else {
-                    // Normal padding after header
-                    element_padding * self.hidpi_scale * zoom
-                }
+                // Headers always get at least 2px padding after them
+                let min_header_padding = 2.0 * self.hidpi_scale * zoom;
+                let normal_padding = element_padding * self.hidpi_scale * zoom;
+                normal_padding.max(min_header_padding)
             } else if matches!(&elements[i].inner, Element::Table(_)) {
                 // Tables always get at least 6px padding for consistency
                 let min_table_padding = 6.0 * self.hidpi_scale * zoom;
