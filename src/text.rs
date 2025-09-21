@@ -107,6 +107,22 @@ pub struct CachedTextArea {
 }
 
 impl CachedTextArea {
+    pub fn new(
+        key: KeyHash,
+        left: f32,
+        top: f32,
+        bounds: TextBounds,
+        default_color: Color,
+    ) -> Self {
+        Self {
+            key,
+            left,
+            top,
+            bounds,
+            default_color,
+        }
+    }
+
     pub fn text_area<'a>(&self, cache: &'a TextCache) -> TextArea<'a> {
         TextArea {
             buffer: cache.get(&self.key).expect("Get cached buffer"),
@@ -692,26 +708,26 @@ impl Text {
 }
 
 #[derive(Debug, Clone, Copy, Hash)]
-struct Font<'a> {
-    family: glyphon::Family<'a>,
-    weight: glyphon::Weight,
-    style: glyphon::Style,
+pub struct Font<'a> {
+    pub family: glyphon::Family<'a>,
+    pub weight: glyphon::Weight,
+    pub style: glyphon::Style,
 }
 
 #[derive(Clone, Copy, Hash)]
 pub struct SectionKey<'a> {
-    content: &'a str,
-    font: Font<'a>,
-    color: Color,
-    index: usize,
+    pub content: &'a str,
+    pub font: Font<'a>,
+    pub color: Color,
+    pub index: usize,
 }
 
 #[derive(Clone)]
 pub struct Key<'a> {
-    lines: Vec<Vec<SectionKey<'a>>>,
-    size: f32,
-    line_height: f32,
-    bounds: Size,
+    pub lines: Vec<Vec<SectionKey<'a>>>,
+    pub size: f32,
+    pub line_height: f32,
+    pub bounds: Size,
 }
 
 #[derive(Default)]
@@ -730,7 +746,7 @@ impl TextCache {
         self.entries.get(key)
     }
 
-    fn allocate(
+    pub fn allocate(
         &mut self,
         font_system: &mut glyphon::FontSystem,
         key: Key<'_>,

@@ -577,9 +577,9 @@ impl Renderer {
     fn prepare_search_ui(
         &mut self,
         search_active: bool,
-        _search_query: &str,
-        _current_match: Option<usize>,
-        _total_matches: usize,
+        search_query: &str,
+        current_match: Option<usize>,
+        total_matches: usize,
     ) {
         if !search_active {
             return;
@@ -587,10 +587,6 @@ impl Renderer {
 
         let screen_size = self.screen_size();
         let search_bar_height = 40.0 * self.hidpi_scale;
-        
-        // TODO: Render search text and match counter
-        // This would require text rendering capabilities similar to TextBox
-        // For now, we just show the search bar background
         
         // Prepare search bar background rectangle
         let search_bar_rect = Rect::new(
@@ -661,6 +657,149 @@ impl Renderer {
             border_base + 2,
             border_base + 3,
         ]);
+        
+        // Draw search status indicators
+        let text_padding = 10.0 * self.hidpi_scale;
+        let indicator_height = 20.0 * self.hidpi_scale;
+        let indicator_y = screen_size.1 - search_bar_height / 2.0 - indicator_height / 2.0;
+        
+        // Draw search status bar based on query state
+        if !search_query.is_empty() {
+            // Calculate width based on approximate text length
+            let text_width = search_query.len() as f32 * 8.0 * self.hidpi_scale;
+            let indicator_width = text_width.min(screen_size.0 - text_padding * 2.0);
+            
+            // Choose color based on search results
+            let indicator_color = if total_matches > 0 {
+                [0.0, 0.8, 0.0, 0.9] // Green for matches found
+            } else {
+                [0.8, 0.2, 0.0, 0.9] // Red-orange for no matches
+            };
+            
+            // Draw status bar
+            let indicator_rect = Rect::new(
+                (text_padding, indicator_y),
+                (indicator_width, indicator_height),
+            );
+            
+            let min = point(indicator_rect.pos.0, indicator_rect.pos.1, screen_size);
+            let max = point(indicator_rect.max().0, indicator_rect.max().1, screen_size);
+            self.lyon_buffer.vertices.push(Vertex {
+                pos: [min[0], min[1], 0.0],
+                color: indicator_color,
+            });
+            self.lyon_buffer.vertices.push(Vertex {
+                pos: [max[0], min[1], 0.0],
+                color: indicator_color,
+            });
+            self.lyon_buffer.vertices.push(Vertex {
+                pos: [max[0], max[1], 0.0],
+                color: indicator_color,
+            });
+            self.lyon_buffer.vertices.push(Vertex {
+                pos: [min[0], max[1], 0.0],
+                color: indicator_color,
+            });
+            let indicator_base = self.lyon_buffer.vertices.len() as u16 - 4;
+            self.lyon_buffer.indices.extend_from_slice(&[
+                indicator_base,
+                indicator_base + 1,
+                indicator_base + 2,
+                indicator_base,
+                indicator_base + 2,
+                indicator_base + 3,
+            ]);
+            
+            // Draw match counter indicator on the right side
+            if total_matches > 0 && current_match.is_some() {
+                let counter_text = format!("{}/{}", current_match.unwrap() + 1, total_matches);
+                let counter_width = counter_text.len() as f32 * 8.0 * self.hidpi_scale;
+                let counter_x = screen_size.0 - text_padding - counter_width - 20.0 * self.hidpi_scale;
+                
+                // Draw background for counter
+                let counter_rect = Rect::new(
+                    (counter_x, indicator_y),
+                    (counter_width + 20.0 * self.hidpi_scale, indicator_height),
+                );
+                
+                let counter_color = [0.2, 0.2, 0.2, 0.8];
+                let min = point(counter_rect.pos.0, counter_rect.pos.1, screen_size);
+                let max = point(counter_rect.max().0, counter_rect.max().1, screen_size);
+                
+                self.lyon_buffer.vertices.push(Vertex {
+                    pos: [min[0], min[1], 0.0],
+                    color: counter_color,
+                });
+                self.lyon_buffer.vertices.push(Vertex {
+                    pos: [max[0], min[1], 0.0],
+                    color: counter_color,
+                });
+                self.lyon_buffer.vertices.push(Vertex {
+                    pos: [max[0], max[1], 0.0],
+                    color: counter_color,
+                });
+                self.lyon_buffer.vertices.push(Vertex {
+                    pos: [min[0], max[1], 0.0],
+                    color: counter_color,
+                });
+                
+                let counter_base = self.lyon_buffer.vertices.len() as u16 - 4;
+                self.lyon_buffer.indices.extend_from_slice(&[
+                    counter_base,
+                    counter_base + 1,
+                    counter_base + 2,
+                    counter_base,
+                    counter_base + 2,
+                    counter_base + 3,
+                ]);
+            }
+        } else if search_active {
+            // Draw placeholder indicator when search is active but no query yet
+            let placeholder_rect = Rect::new(
+                (text_padding, indicator_y),
+                (100.0 * self.hidpi_scale, 2.0 * self.hidpi_scale),
+            );
+            
+            let placeholder_color = [0.5, 0.5, 0.5, 0.5];
+            let min = point(placeholder_rect.pos.0, placeholder_rect.pos.1, screen_size);
+            let max = point(placeholder_rect.max().0, placeholder_rect.max().1, screen_size);
+            
+            self.lyon_buffer.vertices.push(Vertex {
+                pos: [min[0], min[1], 0.0],
+                color: placeholder_color,
+            });
+            self.lyon_buffer.vertices.push(Vertex {
+                pos: [max[0], min[1], 0.0],
+                color: placeholder_color,
+            });
+            self.lyon_buffer.vertices.push(Vertex {
+                pos: [max[0], max[1], 0.0],
+                color: placeholder_color,
+            });
+            self.lyon_buffer.vertices.push(Vertex {
+                pos: [min[0], max[1], 0.0],
+                color: placeholder_color,
+            });
+            
+            let placeholder_base = self.lyon_buffer.vertices.len() as u16 - 4;
+            self.lyon_buffer.indices.extend_from_slice(&[
+                placeholder_base,
+                placeholder_base + 1,
+                placeholder_base + 2,
+                placeholder_base,
+                placeholder_base + 2,
+                placeholder_base + 3,
+            ]);
+        }
+        
+        // Log search state for debugging
+        tracing::debug!(
+            "Search UI rendered: active={}, query='{}', matches={}, current={:?}",
+            search_active,
+            search_query,
+            total_matches,
+            current_match
+        );
     }
 
     fn draw_rectangle(&mut self, rect: Rect, color: [f32; 4]) -> anyhow::Result<()> {

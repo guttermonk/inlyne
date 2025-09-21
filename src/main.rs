@@ -63,7 +63,7 @@ use clap::Parser;
 use taffy::Taffy;
 use winit::event::{
     ElementState, Event, KeyboardInput, ModifiersState, MouseButton, MouseScrollDelta, 
-    VirtualKeyCode, WindowEvent,
+    WindowEvent,
 };
 use winit::event_loop::{ControlFlow, EventLoop, EventLoopBuilder, EventLoopProxy};
 use winit::window::{CursorIcon, Window, WindowBuilder};
@@ -161,6 +161,7 @@ pub struct Inlyne {
     search_query: String,
     search_matches: Vec<(usize, usize)>, // (element_index, text_index)
     current_match: Option<usize>,
+    search_display_text: String,
 }
 
 impl Inlyne {
@@ -261,6 +262,7 @@ impl Inlyne {
             search_query: String::new(),
             search_matches: Vec::new(),
             current_match: None,
+            search_display_text: String::new(),
         })
     }
 
@@ -602,9 +604,12 @@ impl Inlyne {
             self.search_query.clear();
             self.search_matches.clear();
             self.current_match = None;
-            tracing::info!("Search activated");
+            self.search_display_text = "Type to search...".to_string();
+            tracing::info!("Search activated - ready to receive input");
+            tracing::debug!("Total elements available for search: {}", self.elements.len());
         } else {
             tracing::info!("Search deactivated");
+            self.search_display_text.clear();
         }
         self.window.request_redraw();
     }
@@ -615,6 +620,7 @@ impl Inlyne {
             self.search_query.clear();
             self.search_matches.clear();
             self.current_match = None;
+            self.search_display_text.clear();
             tracing::info!("Search cancelled");
             self.window.request_redraw();
         }
@@ -625,11 +631,24 @@ impl Inlyne {
             return;
         }
         
+        tracing::debug!("Received character for search: {:?} (code: {})", c, c as u32);
+        
         // Handle backspace
         if c == '\u{8}' {
             self.search_query.pop();
+            tracing::debug!("Backspace - search query now: '{}'", self.search_query);
         } else if !c.is_control() {
             self.search_query.push(c);
+            tracing::debug!("Added character - search query now: '{}'", self.search_query);
+        } else {
+            tracing::debug!("Ignoring control character: {:?}", c);
+        }
+        
+        // Update display text
+        if self.search_query.is_empty() {
+            self.search_display_text = "Type to search...".to_string();
+        } else {
+            self.search_display_text = format!("Search: {}", self.search_query);
         }
         
         // Perform search with updated query
@@ -641,29 +660,62 @@ impl Inlyne {
         if self.search_query.is_empty() {
             self.search_matches.clear();
             self.current_match = None;
+            tracing::debug!("Search query empty, clearing matches");
             return;
         }
         
         self.search_matches.clear();
         let query_lower = self.search_query.to_lowercase();
         
+        tracing::debug!("Searching for '{}' in {} elements", query_lower, self.elements.len());
+        
         // Search through all text elements
+        let mut total_text_boxes = 0;
+        let mut total_texts = 0;
         for (elem_idx, element) in self.elements.iter().enumerate() {
             if let Element::TextBox(text_box) = &element.inner {
+                total_text_boxes += 1;
                 for (text_idx, text) in text_box.texts.iter().enumerate() {
-                    if text.text.to_lowercase().contains(&query_lower) {
+                    total_texts += 1;
+                    let text_lower = text.text.to_lowercase();
+                    tracing::trace!("Checking text[{}][{}]: '{}'", elem_idx, text_idx, 
+                        if text.text.len() > 50 { 
+                            format!("{}...", &text.text[..50]) 
+                        } else { 
+                            text.text.clone() 
+                        }
+                    );
+                    if text_lower.contains(&query_lower) {
                         self.search_matches.push((elem_idx, text_idx));
+                        tracing::debug!("Found match at element {} text {}: '{}'", 
+                            elem_idx, text_idx,
+                            if text.text.len() > 50 { 
+                                format!("{}...", &text.text[..50]) 
+                            } else { 
+                                text.text.clone() 
+                            }
+                        );
                     }
                 }
             }
         }
         
+        tracing::debug!("Searched {} text boxes with {} total text segments", total_text_boxes, total_texts);
+        
         // Set current match to first result
         if !self.search_matches.is_empty() {
             self.current_match = Some(0);
             self.jump_to_current_match();
+            // Update display with match count
+            if let Some(current) = self.current_match {
+                self.search_display_text = format!("Search: {} ({}/{})", 
+                    self.search_query, current + 1, self.search_matches.len());
+            }
         } else {
             self.current_match = None;
+            if !self.search_query.is_empty() {
+                self.search_display_text = format!("Search: {} (No matches)", self.search_query);
+            }
         }
         
         tracing::info!("Search for '{}' found {} matches", self.search_query, self.search_matches.len());
@@ -680,6 +732,11 @@ impl Inlyne {
         };
         
         self.jump_to_current_match();
+        // Update display with current match
+        if let Some(idx) = self.current_match {
+            self.search_display_text = format!("Search: {} ({}/{})", 
+                self.search_query, idx + 1, self.search_matches.len());
+        }
         self.window.request_redraw();
     }
 
@@ -695,6 +752,11 @@ impl Inlyne {
         };
         
         self.jump_to_current_match();
+        // Update display with current match
+        if let Some(idx) = self.current_match {
+            self.search_display_text = format!("Search: {} ({}/{})", 
+                self.search_query, idx + 1, self.search_matches.len());
+        }
         self.window.request_redraw();
     }
 
@@ -712,18 +774,7 @@ impl Inlyne {
         }
     }
 
-    fn is_current_search_match(&self, elem_idx: usize, text_idx: usize) -> bool {
-        if !self.search_active || self.search_query.is_empty() {
-            return false;
-        }
-        
-        if let Some(current) = self.current_match {
-            if let Some(&(match_elem, match_text)) = self.search_matches.get(current) {
-                return elem_idx == match_elem && text_idx == match_text;
-            }
-        }
-        false
-    }
+
 
     fn update_file(&mut self, path: &Path, contents: String) {
         self.window.set_title(&utils::format_title(path));
@@ -822,7 +873,7 @@ impl Inlyne {
                             elements_to_render, 
                             &mut self.selection,
                             self.search_active,
-                            &self.search_query,
+                            &self.search_display_text,
                             self.current_match,
                             self.search_matches.len(),
                         )
@@ -1025,14 +1076,17 @@ impl Inlyne {
                     },
                     WindowEvent::ModifiersChanged(new_state) => modifiers = new_state,
                     WindowEvent::ReceivedCharacter(c) => {
+                        tracing::trace!("ReceivedCharacter event: {:?} (search_active: {})", c, self.search_active);
                         if self.search_active {
                             // Handle character input for search
                             if c == '\x1b' {
                                 // Escape key - cancel search
+                                tracing::debug!("Escape key - canceling search");
                                 self.cancel_search();
                             } else if c == '\r' || c == '\n' || c == '\t' {
                                 // Enter, newline, and tab are handled in KeyboardInput event
                                 // Skip these characters in text input
+                                tracing::trace!("Skipping special character in search: {:?}", c);
                             } else {
                                 // Regular character or backspace
                                 self.update_search_query(c);
