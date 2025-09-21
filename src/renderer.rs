@@ -580,9 +580,11 @@ impl Renderer {
         search_query: &str,
         current_match: Option<usize>,
         total_matches: usize,
-    ) {
+    ) -> Vec<CachedTextArea> {
+        let mut text_areas = Vec::new();
+        
         if !search_active {
-            return;
+            return text_areas;
         }
 
         let screen_size = self.screen_size();
@@ -792,14 +794,80 @@ impl Renderer {
             ]);
         }
         
-        // Log search state for debugging
-        tracing::debug!(
-            "Search UI rendered: active={}, query='{}', matches={}, current={:?}",
-            search_active,
-            search_query,
-            total_matches,
-            current_match
-        );
+        // Render search text using glyphon text rendering
+        let text_padding = 10.0 * self.hidpi_scale;
+        let text_y = screen_size.1 - search_bar_height + text_padding;
+        
+        // Build the search text to display
+        let display_text = if search_query.is_empty() {
+            "Type to search...".to_string()
+        } else if total_matches > 0 {
+            if let Some(current) = current_match {
+                format!("Search: {} ({}/{})", search_query, current + 1, total_matches)
+            } else {
+                format!("Search: {} ({} matches)", search_query, total_matches)
+            }
+        } else if !search_query.is_empty() {
+            format!("Search: {} (No matches)", search_query)
+        } else {
+            "Type to search...".to_string()
+        };
+        
+        // Create or update the search text buffer
+        use glyphon::{Attrs, Buffer, Metrics, Shaping};
+        
+        // Use a fixed key for the search UI buffer
+        const SEARCH_UI_KEY: u64 = 0xDEADBEEF_CAFEBABE; // Unique fixed key for search UI
+        
+        let key = {
+            let mut cache = self.text_system.text_cache.lock();
+            
+            // Get or create the buffer
+            if !cache.entries.contains_key(&SEARCH_UI_KEY) {
+                // Create new buffer if it doesn't exist
+                let buffer = Buffer::new(
+                    &mut self.text_system.font_system.lock(),
+                    Metrics::new(16.0 * self.hidpi_scale, 20.0 * self.hidpi_scale),
+                );
+                cache.store_search_buffer(SEARCH_UI_KEY, buffer);
+            }
+            
+            // Update the existing buffer with new text
+            if let Some(buffer) = cache.entries.get_mut(&SEARCH_UI_KEY) {
+                buffer.set_size(
+                    &mut self.text_system.font_system.lock(),
+                    screen_size.0 - (text_padding * 2.0),
+                    search_bar_height,
+                );
+                
+                let attrs = Attrs::new()
+                    .family(glyphon::Family::SansSerif)
+                    .color(glyphon::Color::rgb(255, 255, 255));
+                
+                buffer.set_text(
+                    &mut self.text_system.font_system.lock(),
+                    &display_text,
+                    attrs,
+                    Shaping::Advanced,
+                );
+                
+                buffer.shape_until_scroll(&mut self.text_system.font_system.lock());
+            }
+            
+            cache.recently_used.insert(SEARCH_UI_KEY);
+            SEARCH_UI_KEY
+        };
+        
+        // Create the cached text area
+        text_areas.push(CachedTextArea::new(
+            key,
+            text_padding,
+            text_y,
+            glyphon::TextBounds::default(),
+            glyphon::Color::rgb(255, 255, 255),
+        ));
+        
+        text_areas
     }
 
     fn draw_rectangle(&mut self, rect: Rect, color: [f32; 4]) -> anyhow::Result<()> {
@@ -973,10 +1041,11 @@ impl Renderer {
         // Prepare and render elements that use lyon
         self.lyon_buffer.indices.clear();
         self.lyon_buffer.vertices.clear();
-        let cached_text_areas = self.render_elements(elements, selection)?;
+        let mut cached_text_areas = self.render_elements(elements, selection)?;
         
-        // Add search UI to lyon buffer if active
-        self.prepare_search_ui(search_active, search_query, current_match, total_matches);
+        // Add search UI to lyon buffer and text areas if active
+        let search_text_areas = self.prepare_search_ui(search_active, search_query, current_match, total_matches);
+        cached_text_areas.extend(search_text_areas);
         let vertex_buf = self
             .device
             .create_buffer_init(&wgpu::util::BufferInitDescriptor {

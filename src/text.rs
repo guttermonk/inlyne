@@ -732,8 +732,8 @@ pub struct Key<'a> {
 
 #[derive(Default)]
 pub struct TextCache {
-    entries: FxHashMap<KeyHash, glyphon::Buffer>,
-    recently_used: FxHashSet<KeyHash>,
+    pub entries: FxHashMap<KeyHash, glyphon::Buffer>,
+    pub recently_used: FxHashSet<KeyHash>,
     hasher: HashBuilder,
 }
 
@@ -807,6 +807,12 @@ impl TextCache {
             .retain(|key, _| self.recently_used.contains(key));
 
         self.recently_used.clear();
+    }
+
+    /// Store a buffer directly with a specific key for search UI
+    pub fn store_search_buffer(&mut self, key: KeyHash, buffer: glyphon::Buffer) {
+        self.entries.insert(key, buffer);
+        self.recently_used.insert(key);
     }
 }
 
