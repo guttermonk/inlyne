@@ -291,7 +291,8 @@ impl Renderer {
                                                     [1.0, 0.8, 0.0, 0.3] // Yellow/orange for other matches
                                                 };
                                                 
-                                                let x_offset = cumulative_offset as f32 * char_width;
+                                                // Add 1 pixel adjustment to align properly with text
+                                                let x_offset = (cumulative_offset as f32 * char_width) + 1.0;
                                                 let highlight_rect = Rect::new(
                                                     (pos.0 + node.location.x + x_offset, pos.1 + node.location.y - self.scroll_y),
                                                     (estimated_match_width, node.size.height),
@@ -323,6 +324,7 @@ impl Renderer {
         let mut elem_idx = 0;
         
         // Estimate width based on search query length and average character width
+        // Add slight adjustment to account for font rendering
         let char_width = 8.0 * self.hidpi_scale * self.zoom; // Approximate character width
         let estimated_match_width = (search_query.len() as f32 * char_width).max(20.0);
         
@@ -343,7 +345,8 @@ impl Renderer {
                                 };
                                 
                                 // Use cumulative offset for correct positioning
-                                let x_offset = cumulative_offset as f32 * char_width;
+                                // Add 1 pixel adjustment to align properly with text
+                                let x_offset = (cumulative_offset as f32 * char_width) + 1.0;
                                 
                                 // Draw highlight rectangle at the correct position
                                 let highlight_rect = Rect::new(
@@ -373,7 +376,8 @@ impl Renderer {
                                         };
                                         
                                         // Use cumulative offset for correct positioning
-                                        let x_offset = cumulative_offset as f32 * char_width;
+                                        // Add 1 pixel adjustment to align properly with text
+                                        let x_offset = (cumulative_offset as f32 * char_width) + 1.0;
                                         
                                         // Draw highlight rectangle at the correct position
                                         let highlight_rect = Rect::new(
@@ -414,7 +418,8 @@ impl Renderer {
                                         };
                                         
                                         // Use cumulative offset for correct positioning
-                                        let x_offset = cumulative_offset as f32 * char_width;
+                                        // Add 1 pixel adjustment to align properly with text
+                                        let x_offset = (cumulative_offset as f32 * char_width) + 1.0;
                                         
                                         // Draw highlight rectangle at the correct position
                                         let highlight_rect = Rect::new(

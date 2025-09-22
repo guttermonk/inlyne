@@ -158,6 +158,7 @@ pub struct Inlyne {
     event_loop_proxy: EventLoopProxy<InlyneEvent>,
     // Search state
     search_active: bool,
+    search_navigating: bool, // True when Enter pressed, allows easier navigation
     search_query: String,
     search_matches: Vec<(usize, usize, usize, usize)>, // (element_index, text_index, char_offset, cumulative_offset)
     current_match: Option<usize>,
@@ -259,6 +260,7 @@ impl Inlyne {
             current_file_content: md_string,
             event_loop_proxy,
             search_active: false,
+            search_navigating: false,
             search_query: String::new(),
             search_matches: Vec::new(),
             current_match: None,
@@ -604,6 +606,7 @@ impl Inlyne {
             self.search_query.clear();
             self.search_matches.clear();
             self.current_match = None;
+            self.search_navigating = false;
             self.search_display_text = "Type to search...".to_string();
             
             // Update window title to show search mode
@@ -611,6 +614,7 @@ impl Inlyne {
         } else {
             tracing::info!("Search deactivated");
             self.search_display_text.clear();
+            self.search_navigating = false;
             // Restore original window title
             self.window.set_title(&utils::format_title(&self.opts.history.get_path()));
         }
@@ -620,6 +624,7 @@ impl Inlyne {
     fn cancel_search(&mut self) {
         if self.search_active {
             self.search_active = false;
+            self.search_navigating = false;
             self.search_query.clear();
             self.search_matches.clear();
             self.current_match = None;
@@ -635,6 +640,9 @@ impl Inlyne {
         if !self.search_active {
             return;
         }
+        
+        // Reset navigation mode when typing new text
+        self.search_navigating = false;
         
         // Handle backspace
         if c == '\u{8}' {
@@ -754,8 +762,9 @@ impl Inlyne {
         
         self.jump_to_current_match();
         // Update display with current match
-        self.search_display_text = format!("{} ({}/{})", 
-            self.search_query, self.current_match.unwrap_or(0) + 1, self.search_matches.len());
+        let nav_indicator = if self.search_navigating { " [NAV]" } else { "" };
+        self.search_display_text = format!("{} ({}/{}){}", 
+            self.search_query, self.current_match.unwrap_or(0) + 1, self.search_matches.len(), nav_indicator);
         // Update window title
         self.window.set_title(&format!("[SEARCH] {}", self.search_display_text));
         self.window.request_redraw();
@@ -774,8 +783,9 @@ impl Inlyne {
         
         self.jump_to_current_match();
         // Update display with current match
-        self.search_display_text = format!("{} ({}/{})", 
-            self.search_query, self.current_match.unwrap_or(0) + 1, self.search_matches.len());
+        let nav_indicator = if self.search_navigating { " [NAV]" } else { "" };
+        self.search_display_text = format!("{} ({}/{}){}", 
+            self.search_query, self.current_match.unwrap_or(0) + 1, self.search_matches.len(), nav_indicator);
         // Update window title
         self.window.set_title(&format!("[SEARCH] {}", self.search_display_text));
         self.window.request_redraw();
@@ -845,9 +855,20 @@ impl Inlyne {
                 
                 if let Some(element) = target_element {
                     if let Some(bounds) = &element.bounds {
-                        // Scroll to make the match visible
-                        let target_y = bounds.pos.1 - 100.0; // Leave some margin above
-                        self.renderer.set_scroll_y(target_y);
+                        // Scroll to make the match visible, keeping it centered if possible
+                        let screen_height = self.renderer.config.height as f32;
+                        let element_y = bounds.pos.1;
+                        let element_height = bounds.size.1;
+                        
+                        // Try to center the match in the viewport
+                        let ideal_scroll = element_y - (screen_height / 2.0) + (element_height / 2.0);
+                        
+                        // But ensure we don't scroll past the bounds
+                        let min_scroll = element_y - screen_height + element_height + 50.0; // Keep 50px margin at bottom
+                        let max_scroll = element_y - 50.0; // Keep 50px margin at top
+                        
+                        let new_scroll = ideal_scroll.max(min_scroll).min(max_scroll).max(0.0);
+                        self.renderer.set_scroll_y(new_scroll);
                     }
                 }
             }
@@ -1167,8 +1188,9 @@ impl Inlyne {
                                 return;
                             }
                             
-                            // Skip 'n' when we have matches (it's for navigation)
-                            if (c == 'n' || c == 'N') && !self.search_matches.is_empty() {
+                            // Skip 'n' only when we're in navigation mode (after pressing Enter)
+                            // This allows typing 'n' in search queries before pressing Enter
+                            if (c == 'n' || c == 'N') && self.search_navigating {
                                 return;
                             }
                             
@@ -1198,15 +1220,23 @@ impl Inlyne {
                         // Handle search navigation keys directly when search is active with matches
                         let search_nav_handled = if self.search_active && !self.search_matches.is_empty() {
                             match virtual_keycode {
-                                Some(VirtualKeyCode::Return) | Some(VirtualKeyCode::Tab) if modifiers.is_empty() => {
+                                Some(VirtualKeyCode::Return) if modifiers.is_empty() => {
+                                    // Enter activates navigation mode and goes to next match
+                                    self.search_navigating = true;
                                     self.next_match();
                                     true
                                 }
-                                Some(VirtualKeyCode::N) if modifiers.is_empty() => {
+                                Some(VirtualKeyCode::Tab) if modifiers.is_empty() => {
                                     self.next_match();
                                     true
                                 }
-                                Some(VirtualKeyCode::N) if modifiers == ModifiersState::SHIFT => {
+                                Some(VirtualKeyCode::N) if modifiers.is_empty() && self.search_navigating => {
+                                    // 'n' only works for navigation when in navigation mode (after Enter)
+                                    self.next_match();
+                                    true
+                                }
+                                Some(VirtualKeyCode::N) if modifiers == ModifiersState::SHIFT && self.search_navigating => {
+                                    // Shift+n for previous match in navigation mode
                                     self.prev_match();
                                     true
                                 }
