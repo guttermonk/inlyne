@@ -279,7 +279,7 @@ impl Renderer {
                                     None => continue,
                                 };
                                 for (col_idx, node) in node_row.iter().enumerate() {
-                                    if col_idx < table_row.len() {
+                                    if let Some(text_box) = table_row.get(col_idx) {
                                         // Check if this cell index has any matches
                                         for (match_idx, &(match_elem_idx, _text_idx, _char_offset, cumulative_offset)) in search_matches.iter().enumerate() {
                                             if match_elem_idx == elem_idx {
@@ -291,11 +291,23 @@ impl Renderer {
                                                     [1.0, 0.8, 0.0, 0.3] // Yellow/orange for other matches
                                                 };
                                                 
-                                                // Add 1 pixel adjustment to align properly with text
-                                                let x_offset = (cumulative_offset as f32 * char_width) + 1.0;
+                                                // Use actual font size from table cell TextBox
+                                                let actual_font_size = text_box.font_size * self.hidpi_scale * self.zoom;
+                                                let actual_char_width = actual_font_size * 0.5;
+                                                let actual_line_height = actual_font_size * 1.2;
+                                                
+                                                // Calculate width for this specific match
+                                                let match_width = if search_query.chars().count() == 1 {
+                                                    actual_char_width * 1.2
+                                                } else {
+                                                    search_query.chars().count() as f32 * actual_char_width
+                                                };
+                                                
+                                                // Calculate position with actual metrics
+                                                let x_offset = cumulative_offset as f32 * actual_char_width;
                                                 let highlight_rect = Rect::new(
                                                     (pos.0 + node.location.x + x_offset, pos.1 + node.location.y - self.scroll_y),
-                                                    (estimated_match_width, node.size.height),
+                                                    (match_width, actual_line_height.min(node.size.height)),
                                                 );
                                                 self.draw_rectangle(highlight_rect, highlight_color)?;
                                             }
@@ -323,15 +335,12 @@ impl Renderer {
     ) -> anyhow::Result<()> {
         let mut elem_idx = 0;
         
-        // Estimate width based on search query length and average character width
-        // Add slight adjustment to account for font rendering
-        let char_width = 8.0 * self.hidpi_scale * self.zoom; // Approximate character width
-        let estimated_match_width = (search_query.len() as f32 * char_width).max(20.0);
+        // Removed - now using actual font sizes from TextBox elements
         
         // Iterate through all elements to find matches
         for element in elements.iter() {
             match &element.inner {
-                Element::TextBox(_) => {
+                Element::TextBox(text_box) => {
                     // Check if this element index has any matches
                     for (match_idx, &(match_elem_idx, _text_idx, _char_offset, cumulative_offset)) in search_matches.iter().enumerate() {
                         if match_elem_idx == elem_idx {
@@ -344,14 +353,26 @@ impl Renderer {
                                     [1.0, 0.8, 0.0, 0.3] // Yellow/orange for other matches
                                 };
                                 
+                                // Use actual font size from the TextBox for accurate metrics
+                                let actual_font_size = text_box.font_size * self.hidpi_scale * self.zoom;
+                                let actual_char_width = actual_font_size * 0.5;
+                                let actual_line_height = actual_font_size * 1.2;
+                                
+                                // Calculate match width based on actual font size
+                                let match_width = if search_query.chars().count() == 1 {
+                                    actual_char_width * 1.2
+                                } else {
+                                    search_query.chars().count() as f32 * actual_char_width
+                                };
+                                
                                 // Use cumulative offset for correct positioning
-                                // Add 1 pixel adjustment to align properly with text
-                                let x_offset = (cumulative_offset as f32 * char_width) + 1.0;
+                                let x_offset = cumulative_offset as f32 * actual_char_width;
                                 
                                 // Draw highlight rectangle at the correct position
+                                // Limit height to line height to prevent multi-line highlighting
                                 let highlight_rect = Rect::new(
                                     (bounds.pos.0 + x_offset, bounds.pos.1 - self.scroll_y),
-                                    (estimated_match_width, bounds.size.1),
+                                    (match_width, actual_line_height.min(bounds.size.1)),
                                 );
                                 self.draw_rectangle(highlight_rect, highlight_color)?;
                             }
@@ -362,7 +383,7 @@ impl Renderer {
                 Element::Section(section) => {
                     // Recursively count TextBox elements in sections
                     for sub_element in section.elements.iter() {
-                        if let Element::TextBox(_) = &sub_element.inner {
+                        if let Element::TextBox(text_box) = &sub_element.inner {
                             // Check if this element index has any matches
                             for (match_idx, &(match_elem_idx, _text_idx, _char_offset, cumulative_offset)) in search_matches.iter().enumerate() {
                                 if match_elem_idx == elem_idx {
@@ -375,14 +396,26 @@ impl Renderer {
                                             [1.0, 0.8, 0.0, 0.3] // Yellow/orange for other matches
                                         };
                                         
+                                        // Use actual font size from the TextBox for accurate metrics
+                                        let actual_font_size = text_box.font_size * self.hidpi_scale * self.zoom;
+                                        let actual_char_width = actual_font_size * 0.5;
+                                        let actual_line_height = actual_font_size * 1.2;
+                                        
+                                        // Calculate match width based on actual font size
+                                        let match_width = if search_query.chars().count() == 1 {
+                                            actual_char_width * 1.2
+                                        } else {
+                                            search_query.chars().count() as f32 * actual_char_width
+                                        };
+                                        
                                         // Use cumulative offset for correct positioning
-                                        // Add 1 pixel adjustment to align properly with text
-                                        let x_offset = (cumulative_offset as f32 * char_width) + 1.0;
+                                        let x_offset = cumulative_offset as f32 * actual_char_width;
                                         
                                         // Draw highlight rectangle at the correct position
+                                        // Limit height to line height to prevent multi-line highlighting
                                         let highlight_rect = Rect::new(
                                             (bounds.pos.0 + x_offset, bounds.pos.1 - self.scroll_y),
-                                            (estimated_match_width, bounds.size.1),
+                                            (match_width, actual_line_height.min(bounds.size.1)),
                                         );
                                         self.draw_rectangle(highlight_rect, highlight_color)?;
                                     }
@@ -404,7 +437,7 @@ impl Renderer {
                 Element::Row(row) => {
                     // Handle standalone rows (Row elements contain Positioned<Element>)
                     for cell in &row.elements {
-                        if let Element::TextBox(_) = &cell.inner {
+                        if let Element::TextBox(text_box) = &cell.inner {
                             // Check if this element index has any matches
                             for (match_idx, &(match_elem_idx, _text_idx, _char_offset, cumulative_offset)) in search_matches.iter().enumerate() {
                                 if match_elem_idx == elem_idx {
@@ -417,14 +450,26 @@ impl Renderer {
                                             [1.0, 0.8, 0.0, 0.3] // Yellow/orange for other matches
                                         };
                                         
+                                        // Use actual font size from the TextBox for accurate metrics
+                                        let actual_font_size = text_box.font_size * self.hidpi_scale * self.zoom;
+                                        let actual_char_width = actual_font_size * 0.5;
+                                        let actual_line_height = actual_font_size * 1.2;
+                                        
+                                        // Calculate match width based on actual font size
+                                        let match_width = if search_query.chars().count() == 1 {
+                                            actual_char_width * 1.2
+                                        } else {
+                                            search_query.chars().count() as f32 * actual_char_width
+                                        };
+                                        
                                         // Use cumulative offset for correct positioning
-                                        // Add 1 pixel adjustment to align properly with text
-                                        let x_offset = (cumulative_offset as f32 * char_width) + 1.0;
+                                        let x_offset = cumulative_offset as f32 * actual_char_width;
                                         
                                         // Draw highlight rectangle at the correct position
+                                        // Limit height to line height to prevent multi-line highlighting
                                         let highlight_rect = Rect::new(
                                             (bounds.pos.0 + x_offset, bounds.pos.1 - self.scroll_y),
-                                            (estimated_match_width, bounds.size.1),
+                                            (match_width, actual_line_height.min(bounds.size.1)),
                                         );
                                         self.draw_rectangle(highlight_rect, highlight_color)?;
                                     }

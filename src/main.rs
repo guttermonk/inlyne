@@ -684,11 +684,15 @@ impl Inlyne {
                 let mut start = 0;
                 while let Some(pos) = text_lower[start..].find(&query_lower) {
                     let char_offset = start + pos;
-                    // Store element index, text index, character offset within segment, and cumulative offset
-                    self.search_matches.push((elem_idx, text_idx, char_offset, cumulative_offset + char_offset));
+                    // Calculate character-based offset (not byte-based) for proper positioning
+                    let char_position = text.text[..start + pos].chars().count();
+                    let cumulative_char_position = cumulative_offset + char_position;
+                    // Store element index, text index, character offset within segment, and cumulative character position
+                    self.search_matches.push((elem_idx, text_idx, char_offset, cumulative_char_position));
                     start = char_offset + query_lower.len();
                 }
-                cumulative_offset += text.text.len();
+                // Count characters, not bytes, for cumulative offset
+                cumulative_offset += text.text.chars().count();
             }
         };
         
