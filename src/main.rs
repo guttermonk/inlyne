@@ -1262,124 +1262,147 @@ impl Inlyne {
                             let action_result = self.keycombos.munch(modified_key);
                             
                             if let Some(action) = action_result {
-                                match action {
-                                Action::ToEdge(direction) => {
-                                    let scroll = match direction {
-                                        VertDirection::Up => 0.0,
-                                        VertDirection::Down => f32::INFINITY,
-                                    };
-                                    self.renderer.set_scroll_y(scroll);
-                                    self.window.request_redraw();
-                                }
-                                Action::Scroll(direction) => {
-                                    let lines = match direction {
-                                        VertDirection::Up => 1.0,
-                                        VertDirection::Down => -1.0,
-                                    };
-
-                                    Self::scroll_lines(
-                                        &mut self.renderer,
-                                        &self.window,
-                                        self.lines_to_scroll,
-                                        lines,
-                                    )
-                                }
-                                Action::Page(direction) => {
-                                    // Move 90% of current page height
-                                    let scroll_amount = self.renderer.config.height as f32 * 0.9;
-                                    let scroll_with_direction = match direction {
-                                        VertDirection::Up => scroll_amount,
-                                        VertDirection::Down => -scroll_amount,
-                                    };
-
-                                    Self::scroll_pixels(
-                                        &mut self.renderer,
-                                        &self.window,
-                                        scroll_with_direction,
-                                    );
-                                }
-                                Action::Zoom(zoom_action) => {
-                                    let zoom = match zoom_action {
-                                        Zoom::In => self.renderer.zoom * 1.1,
-                                        Zoom::Out => self.renderer.zoom * 0.9,
-                                        Zoom::Reset => 1.0,
-                                    };
-
-                                    self.renderer.zoom = zoom;
-                                    let old_reserved = self.renderer.positioner.reserved_height;
-                                    self.renderer.reposition(&mut self.elements).unwrap();
-                                    let new_reserved = self.renderer.positioner.reserved_height;
-                                    self.renderer.set_scroll_y(
-                                        self.renderer.scroll_y * (new_reserved / old_reserved),
-                                    );
-                                    self.window.request_redraw();
-                                }
-                                Action::Copy => clipboard
-                                    .set_contents(self.selection.text.trim().to_owned()),
-                                Action::Help => {
-                                    if !self.help_visible {
-                                        self.help_visible = true;
-                                        self.show_help();
-                                    } else {
-                                        self.help_visible = false;
-                                        self.hide_help();
-                                    }
-                                }
-                                Action::Search => {
-                                    self.toggle_search();
-                                }
-                                Action::CancelSearch => {
-                                    self.cancel_search();
-                                }
-                                // NextMatch and PrevMatch are now handled directly when search is active
-                                // These cases remain for when search is not active or for custom keybindings
-                                Action::NextMatch => {
-                                    if self.search_active && !self.search_matches.is_empty() {
-                                        self.next_match();
-                                    }
-                                }
-                                Action::PrevMatch => {
-                                    if self.search_active && !self.search_matches.is_empty() {
-                                        self.prev_match();
-                                    }
-                                }
-                                Action::Quit => {
-                                    // Escape key handling - first press cancels search, second press may quit
-                                    if self.search_active {
-                                        self.cancel_search();
-                                    } else if self.help_visible {
-                                        self.help_visible = false;
-                                        self.hide_help();
-                                    } else {
-                                        *control_flow = ControlFlow::Exit;
-                                    }
-                                }
-                                Action::History(hist_dir) => {
-                                    let changed_path = match hist_dir {
-                                        HistDirection::Next => self.opts.history.next(),
-                                        HistDirection::Prev => self.opts.history.previous(),
-                                    }.map(ToOwned::to_owned);
-                                    let Some(file_path) = changed_path else {
-                                        return;
-                                    };
-                                    match read_to_string(&file_path) {
-                                        Ok(contents) => {
-                                            self.update_file(&file_path, contents);
-                                            let parent = file_path.parent().expect("File should have parent directory");
-                                            std::env::set_current_dir(parent).expect("Could not set current directory.");
+                                // When search is active, only allow search-related actions
+                                if self.search_active {
+                                    match action {
+                                        Action::Search => {
+                                            // Toggle search off
+                                            self.toggle_search();
                                         }
-                                        Err(err) => {
-                                            tracing::warn!(
-                                                "Failed loading markdown file at {}\nError: {}",
-                                                file_path.display(),
-                                                err,
-                                            );
+                                        Action::CancelSearch | Action::Quit => {
+                                            // Cancel search
+                                            self.cancel_search();
+                                        }
+                                        Action::NextMatch => {
+                                            if !self.search_matches.is_empty() {
+                                                self.next_match();
+                                            }
+                                        }
+                                        Action::PrevMatch => {
+                                            if !self.search_matches.is_empty() {
+                                                self.prev_match();
+                                            }
+                                        }
+                                        Action::Copy => {
+                                            // Allow copying while searching
+                                            clipboard.set_contents(self.selection.text.trim().to_owned())
+                                        }
+                                        _ => {
+                                            // Ignore all other actions while search is active
+                                            tracing::debug!("Action {:?} ignored while search is active", action);
                                         }
                                     }
+                                } else {
+                                    // Normal action processing when search is not active
+                                    match action {
+                                    Action::ToEdge(direction) => {
+                                        let scroll = match direction {
+                                            VertDirection::Up => 0.0,
+                                            VertDirection::Down => f32::INFINITY,
+                                        };
+                                        self.renderer.set_scroll_y(scroll);
+                                        self.window.request_redraw();
+                                    }
+                                    Action::Scroll(direction) => {
+                                        let lines = match direction {
+                                            VertDirection::Up => 1.0,
+                                            VertDirection::Down => -1.0,
+                                        };
+
+                                        Self::scroll_lines(
+                                            &mut self.renderer,
+                                            &self.window,
+                                            self.lines_to_scroll,
+                                            lines,
+                                        )
+                                    }
+                                    Action::Page(direction) => {
+                                        // Move 90% of current page height
+                                        let scroll_amount = self.renderer.config.height as f32 * 0.9;
+                                        let scroll_with_direction = match direction {
+                                            VertDirection::Up => scroll_amount,
+                                            VertDirection::Down => -scroll_amount,
+                                        };
+
+                                        Self::scroll_pixels(
+                                            &mut self.renderer,
+                                            &self.window,
+                                            scroll_with_direction,
+                                        );
+                                    }
+                                    Action::Zoom(zoom_action) => {
+                                        let zoom = match zoom_action {
+                                            Zoom::In => self.renderer.zoom * 1.1,
+                                            Zoom::Out => self.renderer.zoom * 0.9,
+                                            Zoom::Reset => 1.0,
+                                        };
+
+                                        self.renderer.zoom = zoom;
+                                        let old_reserved = self.renderer.positioner.reserved_height;
+                                        self.renderer.reposition(&mut self.elements).unwrap();
+                                        let new_reserved = self.renderer.positioner.reserved_height;
+                                        self.renderer.set_scroll_y(
+                                            self.renderer.scroll_y * (new_reserved / old_reserved),
+                                        );
+                                        self.window.request_redraw();
+                                    }
+                                    Action::Copy => clipboard
+                                        .set_contents(self.selection.text.trim().to_owned()),
+                                    Action::Help => {
+                                        if !self.help_visible {
+                                            self.help_visible = true;
+                                            self.show_help();
+                                        } else {
+                                            self.help_visible = false;
+                                            self.hide_help();
+                                        }
+                                    }
+                                    Action::Search => {
+                                        self.toggle_search();
+                                    }
+                                    Action::CancelSearch => {
+                                        // This action doesn't do anything when search is not active
+                                        tracing::debug!("CancelSearch action ignored - search not active");
+                                    }
+                                    Action::NextMatch | Action::PrevMatch => {
+                                        // These actions don't do anything when search is not active
+                                        tracing::debug!("Match navigation action ignored - search not active");
+                                    }
+                                    Action::Quit => {
+                                        if self.help_visible {
+                                            self.help_visible = false;
+                                            self.hide_help();
+                                        } else {
+                                            *control_flow = ControlFlow::Exit;
+                                        }
+                                    }
+                                    Action::History(hist_dir) => {
+                                        let changed_path = match hist_dir {
+                                            HistDirection::Next => self.opts.history.next(),
+                                            HistDirection::Prev => self.opts.history.previous(),
+                                        }.map(ToOwned::to_owned);
+                                        let Some(file_path) = changed_path else {
+                                            return;
+                                        };
+                                        match read_to_string(&file_path) {
+                                            Ok(contents) => {
+                                                self.update_file(&file_path, contents);
+                                                let parent = file_path.parent().expect("File should have parent directory");
+                                                std::env::set_current_dir(parent).expect("Could not set current directory.");
+                                            }
+                                            Err(err) => {
+                                                tracing::warn!(
+                                                    "Failed loading markdown file at {}\nError: {}",
+                                                    file_path.display(),
+                                                    err,
+                                                );
+                                            }
+                                        }
+                                    }
+                                    } // End of match action (non-search mode)
                                 }
-                            } // End of match action
-                        } // End of if let Some(action) = action_result
-                    } // End of if !search_nav_handled
+                            } // End of if let Some(action) = action_result
+                        } // End of if !search_nav_handled
                     }
                     _ => {}
                 },

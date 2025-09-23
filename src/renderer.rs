@@ -233,6 +233,7 @@ impl Renderer {
         search_matches: &[(usize, usize, usize, usize)],
         elem_idx: usize,
         current_match: Option<usize>,
+        actual_bounds: Option<Size>,
     ) -> Vec<(Rect, [f32; 4])> {
         use glyphon::{Cursor, Affinity};
         
@@ -249,8 +250,16 @@ impl Renderer {
             return highlight_rects;
         }
         
+        // Adjust position for checkboxes - same as in render_elements
+        let mut adjusted_pos = element_pos;
+        if text_box.is_checkbox.is_some() {
+            let box_size = text_box.font_size * self.hidpi_scale * self.zoom * 0.75;
+            adjusted_pos.0 += box_size * 1.5;
+        }
+        
         // Get the buffer for this TextBox from the cache
-        let bounds = (f32::INFINITY, f32::INFINITY);
+        // Use actual bounds if provided (for table cells), otherwise use infinite bounds
+        let bounds = actual_bounds.unwrap_or((f32::INFINITY, f32::INFINITY));
         let key = text_box.key(bounds, self.zoom);
         
         let mut cache = self.text_system.text_cache.lock();
@@ -265,7 +274,7 @@ impl Renderer {
         
         // Track character position across all lines
         let mut total_char_offset = 0;
-        let mut y = element_pos.1 - self.scroll_y;
+        let mut y = adjusted_pos.1 - self.scroll_y;
         
         for (line_i, run) in buffer.layout_runs().enumerate() {
             let line_start = total_char_offset;
@@ -305,7 +314,7 @@ impl Renderer {
                         
                         highlight_rects.push((
                             Rect::new(
-                                (element_pos.0 + highlight_x, y),
+                                (adjusted_pos.0 + highlight_x, y),
                                 (highlight_w, line_height),
                             ),
                             color,
@@ -368,40 +377,30 @@ impl Renderer {
                         if let std::result::Result::Ok(layout) = layout_result {
                             // Check each table cell for matches
                             for (row_idx, node_row) in layout.rows.iter().enumerate() {
-                                let table_row: &Vec<TextBox> = match table.rows.get(row_idx) {
-                                    Some(row) => row,
-                                    None => continue,
-                                };
-                                for (col_idx, node) in node_row.iter().enumerate() {
-                                    if let Some(text_box) = table_row.get(col_idx) {
-                                        // Check if this cell index has any matches
-                                        for (match_idx, &(match_elem_idx, _text_idx, _char_offset, cumulative_offset)) in search_matches.iter().enumerate() {
-                                            if match_elem_idx == elem_idx {
-                                                // Draw highlight for this table cell match
-                                                let is_current = current_match == Some(match_idx);
-                                                let highlight_color = if is_current {
-                                                    [0.0, 1.0, 0.0, 0.4] // Bright green for current match
-                                                } else {
-                                                    [1.0, 0.8, 0.0, 0.3] // Yellow/orange for other matches
-                                                };
-                                                
-                                                // For table cells, we can't use buffer.layout_runs() directly
-                                                // since we don't have the positioned buffer here.
-                                                // Fall back to estimation for now.
-                                                let font_size = text_box.font_size * self.hidpi_scale * self.zoom;
-                                                let char_width = font_size * 0.5;
-                                                let line_height = font_size * 1.2;
-                                                let match_width = search_query.chars().count() as f32 * char_width;
-                                                let x_offset = cumulative_offset as f32 * char_width;
-                                                
-                                                let highlight_rect = Rect::new(
-                                                    (pos.0 + node.location.x + x_offset, pos.1 + node.location.y - self.scroll_y),
-                                                    (match_width.max(char_width), line_height.min(node.size.height)),
-                                                );
-                                                self.draw_rectangle(highlight_rect, highlight_color)?;
+                                if let Some(table_row) = table.rows.get(row_idx) {
+                                    for (col_idx, node) in node_row.iter().enumerate() {
+                                        if let Some(text_box) = table_row.get(col_idx) {
+                                            // Use the same accurate highlighting as regular text
+                                            let cell_pos = (pos.0 + node.location.x, pos.1 + node.location.y);
+                                            let cell_bounds = Some((node.size.width, node.size.height));
+                                            
+                                            let highlights = self.calculate_highlight_rectangles(
+                                                text_box,
+                                                cell_pos,
+                                                search_query,
+                                                search_matches,
+                                                elem_idx,
+                                                current_match,
+                                                cell_bounds,
+                                            );
+                                            
+                                            // Draw the highlights for this cell
+                                            for (rect, color) in highlights {
+                                                self.draw_rectangle(rect, color)?;
                                             }
+                                            
+                                            elem_idx += 1;
                                         }
-                                        elem_idx += 1;
                                     }
                                 }
                             }
@@ -440,6 +439,7 @@ impl Renderer {
                             search_matches,
                             elem_idx,
                             current_match,
+                            None, // Regular text doesn't need specific bounds
                         );
                         all_highlights.extend(highlights);
                     }
@@ -458,6 +458,7 @@ impl Renderer {
                                     search_matches,
                                     elem_idx,
                                     current_match,
+                                    None, // Regular text doesn't need specific bounds
                                 );
                                 all_highlights.extend(highlights);
                             }
@@ -487,6 +488,7 @@ impl Renderer {
                                     search_matches,
                                     elem_idx,
                                     current_match,
+                                    None, // Row elements typically don't need specific bounds
                                 );
                                 all_highlights.extend(highlights);
                             }
