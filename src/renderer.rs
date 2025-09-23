@@ -225,6 +225,102 @@ impl Renderer {
         self.theme.scrollbar_width as f32
     }
 
+    fn calculate_highlight_rectangles(
+        &mut self,
+        text_box: &TextBox,
+        element_pos: Point,
+        search_query: &str,
+        search_matches: &[(usize, usize, usize, usize)],
+        elem_idx: usize,
+        current_match: Option<usize>,
+    ) -> Vec<(Rect, [f32; 4])> {
+        use glyphon::{Cursor, Affinity};
+        
+        let mut highlight_rects = Vec::new();
+        
+        // Find all matches for this element
+        let element_matches: Vec<_> = search_matches
+            .iter()
+            .enumerate()
+            .filter(|(_, (match_elem_idx, _, _, _))| *match_elem_idx == elem_idx)
+            .collect();
+        
+        if element_matches.is_empty() {
+            return highlight_rects;
+        }
+        
+        // Get the buffer for this TextBox from the cache
+        let bounds = (f32::INFINITY, f32::INFINITY);
+        let key = text_box.key(bounds, self.zoom);
+        
+        let mut cache = self.text_system.text_cache.lock();
+        let (_, buffer) = cache.allocate(
+            &mut self.text_system.font_system.lock(),
+            key,
+        );
+        
+        // Get line height from buffer metrics
+        let line_height = buffer.metrics().line_height;
+        let query_len = search_query.chars().count();
+        
+        // Track character position across all lines
+        let mut total_char_offset = 0;
+        let mut y = element_pos.1 - self.scroll_y;
+        
+        for (line_i, run) in buffer.layout_runs().enumerate() {
+            let line_start = total_char_offset;
+            let line_end = total_char_offset + run.text.len();
+            
+            // Check each match to see if it's on this line
+            for (match_idx, (_, _, _, cumulative_offset)) in &element_matches {
+                let match_start = *cumulative_offset;
+                let match_end = match_start + query_len;
+                
+                // Check if this match is on the current line
+                if match_start < line_end && match_end > line_start {
+                    // Calculate relative positions within this line
+                    let start_in_line = match_start.saturating_sub(line_start);
+                    let end_in_line = (match_end).min(line_end) - line_start;
+                    
+                    // Create cursors for the match range
+                    let start_cursor = Cursor::new_with_affinity(
+                        line_i,
+                        start_in_line,
+                        Affinity::After
+                    );
+                    let end_cursor = Cursor::new_with_affinity(
+                        line_i,
+                        end_in_line,
+                        Affinity::Before
+                    );
+                    
+                    // Use line.highlight() to get exact position and width
+                    if let Some((highlight_x, highlight_w)) = run.highlight(start_cursor, end_cursor) {
+                        let is_current = Some(*match_idx) == current_match;
+                        let color = if is_current {
+                            [0.0, 1.0, 0.0, 0.4] // Green for current match
+                        } else {
+                            [1.0, 0.8, 0.0, 0.3] // Orange for other matches
+                        };
+                        
+                        highlight_rects.push((
+                            Rect::new(
+                                (element_pos.0 + highlight_x, y),
+                                (highlight_w, line_height),
+                            ),
+                            color,
+                        ));
+                    }
+                }
+            }
+            
+            total_char_offset = line_end;
+            y += line_height;
+        }
+        
+        highlight_rects
+    }
+
     fn draw_search_highlights_with_tables(
         &mut self,
         elements: &[Positioned<Element>],
@@ -237,8 +333,6 @@ impl Renderer {
         
         // Then handle table highlights separately since they need layout information
         let mut elem_idx = 0;
-        let char_width = 8.0 * self.hidpi_scale * self.zoom;
-        let estimated_match_width = (search_query.len() as f32 * char_width).max(20.0);
         let screen_size = self.screen_size();
         let centering = (screen_size.0 - self.page_width).max(0.) / 2.;
         
@@ -291,23 +385,18 @@ impl Renderer {
                                                     [1.0, 0.8, 0.0, 0.3] // Yellow/orange for other matches
                                                 };
                                                 
-                                                // Use actual font size from table cell TextBox
-                                                let actual_font_size = text_box.font_size * self.hidpi_scale * self.zoom;
-                                                let actual_char_width = actual_font_size * 0.5;
-                                                let actual_line_height = actual_font_size * 1.2;
+                                                // For table cells, we can't use buffer.layout_runs() directly
+                                                // since we don't have the positioned buffer here.
+                                                // Fall back to estimation for now.
+                                                let font_size = text_box.font_size * self.hidpi_scale * self.zoom;
+                                                let char_width = font_size * 0.5;
+                                                let line_height = font_size * 1.2;
+                                                let match_width = search_query.chars().count() as f32 * char_width;
+                                                let x_offset = cumulative_offset as f32 * char_width;
                                                 
-                                                // Calculate width for this specific match
-                                                let match_width = if search_query.chars().count() == 1 {
-                                                    actual_char_width * 1.2
-                                                } else {
-                                                    search_query.chars().count() as f32 * actual_char_width
-                                                };
-                                                
-                                                // Calculate position with actual metrics
-                                                let x_offset = cumulative_offset as f32 * actual_char_width;
                                                 let highlight_rect = Rect::new(
                                                     (pos.0 + node.location.x + x_offset, pos.1 + node.location.y - self.scroll_y),
-                                                    (match_width, actual_line_height.min(node.size.height)),
+                                                    (match_width.max(char_width), line_height.min(node.size.height)),
                                                 );
                                                 self.draw_rectangle(highlight_rect, highlight_color)?;
                                             }
@@ -335,91 +424,42 @@ impl Renderer {
     ) -> anyhow::Result<()> {
         let mut elem_idx = 0;
         
-        // Removed - now using actual font sizes from TextBox elements
+        // Store all highlight rectangles to draw
+        let mut all_highlights = Vec::new();
         
-        // Iterate through all elements to find matches
+        // Iterate through all elements to calculate highlight positions
         for element in elements.iter() {
             match &element.inner {
                 Element::TextBox(text_box) => {
-                    // Check if this element index has any matches
-                    for (match_idx, &(match_elem_idx, _text_idx, _char_offset, cumulative_offset)) in search_matches.iter().enumerate() {
-                        if match_elem_idx == elem_idx {
-                            // Draw highlight for this match at the correct position
-                            if let Some(bounds) = &element.bounds {
-                                let is_current = current_match == Some(match_idx);
-                                let highlight_color = if is_current {
-                                    [0.0, 1.0, 0.0, 0.4] // Bright green for current match
-                                } else {
-                                    [1.0, 0.8, 0.0, 0.3] // Yellow/orange for other matches
-                                };
-                                
-                                // Use actual font size from the TextBox for accurate metrics
-                                let actual_font_size = text_box.font_size * self.hidpi_scale * self.zoom;
-                                let actual_char_width = actual_font_size * 0.5;
-                                let actual_line_height = actual_font_size * 1.2;
-                                
-                                // Calculate match width based on actual font size
-                                let match_width = if search_query.chars().count() == 1 {
-                                    actual_char_width * 1.2
-                                } else {
-                                    search_query.chars().count() as f32 * actual_char_width
-                                };
-                                
-                                // Use cumulative offset for correct positioning
-                                let x_offset = cumulative_offset as f32 * actual_char_width;
-                                
-                                // Draw highlight rectangle at the correct position
-                                // Limit height to line height to prevent multi-line highlighting
-                                let highlight_rect = Rect::new(
-                                    (bounds.pos.0 + x_offset, bounds.pos.1 - self.scroll_y),
-                                    (match_width, actual_line_height.min(bounds.size.1)),
-                                );
-                                self.draw_rectangle(highlight_rect, highlight_color)?;
-                            }
-                        }
+                    if let Some(bounds) = &element.bounds {
+                        // Calculate accurate highlight positions using buffer layout
+                        let highlights = self.calculate_highlight_rectangles(
+                            text_box,
+                            bounds.pos,
+                            search_query,
+                            search_matches,
+                            elem_idx,
+                            current_match,
+                        );
+                        all_highlights.extend(highlights);
                     }
                     elem_idx += 1;
                 }
                 Element::Section(section) => {
-                    // Recursively count TextBox elements in sections
+                    // Recursively handle TextBox elements in sections
                     for sub_element in section.elements.iter() {
                         if let Element::TextBox(text_box) = &sub_element.inner {
-                            // Check if this element index has any matches
-                            for (match_idx, &(match_elem_idx, _text_idx, _char_offset, cumulative_offset)) in search_matches.iter().enumerate() {
-                                if match_elem_idx == elem_idx {
-                                    // Draw highlight for this match
-                                    if let Some(bounds) = &sub_element.bounds {
-                                        let is_current = current_match == Some(match_idx);
-                                        let highlight_color = if is_current {
-                                            [0.0, 1.0, 0.0, 0.4] // Bright green for current match
-                                        } else {
-                                            [1.0, 0.8, 0.0, 0.3] // Yellow/orange for other matches
-                                        };
-                                        
-                                        // Use actual font size from the TextBox for accurate metrics
-                                        let actual_font_size = text_box.font_size * self.hidpi_scale * self.zoom;
-                                        let actual_char_width = actual_font_size * 0.5;
-                                        let actual_line_height = actual_font_size * 1.2;
-                                        
-                                        // Calculate match width based on actual font size
-                                        let match_width = if search_query.chars().count() == 1 {
-                                            actual_char_width * 1.2
-                                        } else {
-                                            search_query.chars().count() as f32 * actual_char_width
-                                        };
-                                        
-                                        // Use cumulative offset for correct positioning
-                                        let x_offset = cumulative_offset as f32 * actual_char_width;
-                                        
-                                        // Draw highlight rectangle at the correct position
-                                        // Limit height to line height to prevent multi-line highlighting
-                                        let highlight_rect = Rect::new(
-                                            (bounds.pos.0 + x_offset, bounds.pos.1 - self.scroll_y),
-                                            (match_width, actual_line_height.min(bounds.size.1)),
-                                        );
-                                        self.draw_rectangle(highlight_rect, highlight_color)?;
-                                    }
-                                }
+                            if let Some(bounds) = &sub_element.bounds {
+                                // Calculate accurate highlight positions using buffer layout
+                                let highlights = self.calculate_highlight_rectangles(
+                                    text_box,
+                                    bounds.pos,
+                                    search_query,
+                                    search_matches,
+                                    elem_idx,
+                                    current_match,
+                                );
+                                all_highlights.extend(highlights);
                             }
                             elem_idx += 1;
                         }
@@ -435,45 +475,20 @@ impl Renderer {
                     }
                 }
                 Element::Row(row) => {
-                    // Handle standalone rows (Row elements contain Positioned<Element>)
+                    // Handle standalone rows
                     for cell in &row.elements {
                         if let Element::TextBox(text_box) = &cell.inner {
-                            // Check if this element index has any matches
-                            for (match_idx, &(match_elem_idx, _text_idx, _char_offset, cumulative_offset)) in search_matches.iter().enumerate() {
-                                if match_elem_idx == elem_idx {
-                                    // Draw highlight for this match
-                                    if let Some(bounds) = &cell.bounds {
-                                        let is_current = current_match == Some(match_idx);
-                                        let highlight_color = if is_current {
-                                            [0.0, 1.0, 0.0, 0.4] // Bright green for current match
-                                        } else {
-                                            [1.0, 0.8, 0.0, 0.3] // Yellow/orange for other matches
-                                        };
-                                        
-                                        // Use actual font size from the TextBox for accurate metrics
-                                        let actual_font_size = text_box.font_size * self.hidpi_scale * self.zoom;
-                                        let actual_char_width = actual_font_size * 0.5;
-                                        let actual_line_height = actual_font_size * 1.2;
-                                        
-                                        // Calculate match width based on actual font size
-                                        let match_width = if search_query.chars().count() == 1 {
-                                            actual_char_width * 1.2
-                                        } else {
-                                            search_query.chars().count() as f32 * actual_char_width
-                                        };
-                                        
-                                        // Use cumulative offset for correct positioning
-                                        let x_offset = cumulative_offset as f32 * actual_char_width;
-                                        
-                                        // Draw highlight rectangle at the correct position
-                                        // Limit height to line height to prevent multi-line highlighting
-                                        let highlight_rect = Rect::new(
-                                            (bounds.pos.0 + x_offset, bounds.pos.1 - self.scroll_y),
-                                            (match_width, actual_line_height.min(bounds.size.1)),
-                                        );
-                                        self.draw_rectangle(highlight_rect, highlight_color)?;
-                                    }
-                                }
+                            if let Some(bounds) = &cell.bounds {
+                                // Calculate accurate highlight positions using buffer layout
+                                let highlights = self.calculate_highlight_rectangles(
+                                    text_box,
+                                    bounds.pos,
+                                    search_query,
+                                    search_matches,
+                                    elem_idx,
+                                    current_match,
+                                );
+                                all_highlights.extend(highlights);
                             }
                             elem_idx += 1;
                         }
@@ -481,6 +496,11 @@ impl Renderer {
                 }
                 _ => {}
             }
+        }
+        
+        // Draw all calculated highlights
+        for (rect, color) in all_highlights {
+            self.draw_rectangle(rect, color)?;
         }
         
         Ok(())
