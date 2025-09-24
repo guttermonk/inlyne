@@ -160,7 +160,7 @@ pub struct Inlyne {
     search_active: bool,
     search_navigating: bool, // True when Enter pressed, allows easier navigation
     search_query: String,
-    search_matches: Vec<(usize, usize, usize, usize)>, // (element_index, text_index, char_offset, cumulative_offset)
+    search_matches: Vec<(usize, usize, usize)>, // (element_index, line_index, byte_offset_in_line)
     current_match: Option<usize>,
     search_display_text: String,
 }
@@ -675,24 +675,72 @@ impl Inlyne {
         self.search_matches.clear();
         let query_lower = self.search_query.to_lowercase();
         
-        // Helper function to search text and add matches
-        let mut add_text_matches = |elem_idx: usize, text_box: &TextBox| {
-            let mut cumulative_offset = 0;
-            for (text_idx, text) in text_box.texts.iter().enumerate() {
-                let text_lower = text.text.to_lowercase();
-                // Find all occurrences of the search query in this text segment
-                let mut start = 0;
-                while let Some(pos) = text_lower[start..].find(&query_lower) {
-                    let char_offset = start + pos;
-                    // Calculate character-based offset (not byte-based) for proper positioning
-                    let char_position = text.text[..start + pos].chars().count();
-                    let cumulative_char_position = cumulative_offset + char_position;
-                    // Store element index, text index, character offset within segment, and cumulative character position
-                    self.search_matches.push((elem_idx, text_idx, char_offset, cumulative_char_position));
-                    start = char_offset + query_lower.len();
+        // Collect search results in a temporary vector to avoid borrow issues
+        let mut temp_matches = Vec::new();
+        
+        // Buffer-aware search: search in the actual rendered text buffers
+        let search_in_buffer = |elem_idx: usize, text_box: &TextBox, renderer: Option<&Renderer>, matches: &mut Vec<(usize, usize, usize)>| {
+            // Try to get the buffer from cache using the renderer's text system
+            if let Some(renderer) = renderer {
+                // Get the buffer for this text box if it exists in cache
+                let bounds = (f32::INFINITY, f32::INFINITY); // Use same bounds as rendering
+                let zoom = renderer.zoom;
+                let key = text_box.key(bounds, zoom);
+                
+                let cache = renderer.text_system.text_cache.lock();
+                let key_hash = cache.calculate_hash(&key);
+                
+                // Check if buffer exists in cache
+                if let Some(buffer) = cache.get(&key_hash) {
+                    // Search within the buffer's actual laid-out lines
+                    for (line_idx, buffer_line) in buffer.lines.iter().enumerate() {
+                        let line_text = buffer_line.text();
+                        let line_lower = line_text.to_lowercase();
+                        
+                        // Find all occurrences in this line
+                        let mut start = 0;
+                        while let Some(pos) = line_lower[start..].find(&query_lower) {
+                            let byte_offset = start + pos;
+                            matches.push((elem_idx, line_idx, byte_offset));
+                            start = byte_offset + query_lower.len();
+                        }
+                    }
+                    return; // Successfully searched in buffer
                 }
-                // Count characters, not bytes, for cumulative offset
-                cumulative_offset += text.text.chars().count();
+            }
+            
+            // Fallback: if buffer not in cache, search the raw text
+            // This ensures we still get results even if buffer isn't cached yet
+            let mut line_idx = 0;
+            let mut current_line = String::new();
+            
+            for text in &text_box.texts {
+                // Process text by lines
+                for ch in text.text.chars() {
+                    if ch == '\n' {
+                        // Search in the completed line
+                        let line_lower = current_line.to_lowercase();
+                        let mut start = 0;
+                        while let Some(pos) = line_lower[start..].find(&query_lower) {
+                            matches.push((elem_idx, line_idx, start + pos));
+                            start = start + pos + query_lower.len();
+                        }
+                        current_line.clear();
+                        line_idx += 1;
+                    } else {
+                        current_line.push(ch);
+                    }
+                }
+            }
+            
+            // Don't forget the last line if it doesn't end with newline
+            if !current_line.is_empty() {
+                let line_lower = current_line.to_lowercase();
+                let mut start = 0;
+                while let Some(pos) = line_lower[start..].find(&query_lower) {
+                    matches.push((elem_idx, line_idx, start + pos));
+                    start = start + pos + query_lower.len();
+                }
             }
         };
         
@@ -701,13 +749,13 @@ impl Inlyne {
         for (_pos_idx, positioned_element) in self.elements.iter().enumerate() {
             match &positioned_element.inner {
                 Element::TextBox(text_box) => {
-                    add_text_matches(elem_count, text_box);
+                    search_in_buffer(elem_count, text_box, Some(&self.renderer), &mut temp_matches);
                     elem_count += 1;
                 }
                 Element::Section(section) => {
                     for sub_element in section.elements.iter() {
                         if let Element::TextBox(text_box) = &sub_element.inner {
-                            add_text_matches(elem_count, text_box);
+                            search_in_buffer(elem_count, text_box, Some(&self.renderer), &mut temp_matches);
                             elem_count += 1;
                         }
                     }
@@ -716,7 +764,7 @@ impl Inlyne {
                     // Search through table rows and cells
                     for row in &table.rows {
                         for text_box in row {
-                            add_text_matches(elem_count, text_box);
+                            search_in_buffer(elem_count, text_box, Some(&self.renderer), &mut temp_matches);
                             elem_count += 1;
                         }
                     }
@@ -725,7 +773,7 @@ impl Inlyne {
                     // Handle standalone rows (shouldn't normally happen, but just in case)
                     for cell_element in &row.elements {
                         if let Element::TextBox(text_box) = &cell_element.inner {
-                            add_text_matches(elem_count, text_box);
+                            search_in_buffer(elem_count, text_box, Some(&self.renderer), &mut temp_matches);
                             elem_count += 1;
                         }
                     }
@@ -733,6 +781,9 @@ impl Inlyne {
                 _ => {}
             }
         }
+        
+        // Move results to search_matches
+        self.search_matches = temp_matches;
         
         // Set current match to first result
         if !self.search_matches.is_empty() {
@@ -796,8 +847,8 @@ impl Inlyne {
     }
 
     fn jump_to_current_match(&mut self) {
-        if let Some(match_idx) = self.current_match {
-            if let Some(&(elem_idx, _, _, _)) = self.search_matches.get(match_idx) {
+        if let Some(current) = self.current_match {
+            if let Some(&(elem_idx, _, _)) = self.search_matches.get(current) {
                 // Find the element using the same indexing as search
                 let mut current_idx = 0;
                 let mut target_element = None;

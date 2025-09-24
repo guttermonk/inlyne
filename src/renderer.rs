@@ -230,7 +230,7 @@ impl Renderer {
         text_box: &TextBox,
         element_pos: Point,
         search_query: &str,
-        search_matches: &[(usize, usize, usize, usize)],
+        search_matches: &[(usize, usize, usize)],
         elem_idx: usize,
         current_match: Option<usize>,
         actual_bounds: Option<Size>,
@@ -243,7 +243,7 @@ impl Renderer {
         let element_matches: Vec<_> = search_matches
             .iter()
             .enumerate()
-            .filter(|(_, (match_elem_idx, _, _, _))| *match_elem_idx == elem_idx)
+            .filter(|(_, (match_elem_idx, _, _))| *match_elem_idx == elem_idx)
             .collect();
         
         if element_matches.is_empty() {
@@ -270,60 +270,58 @@ impl Renderer {
         
         // Get line height from buffer metrics
         let line_height = buffer.metrics().line_height;
-        let query_len = search_query.chars().count();
+        let _query_len = search_query.len(); // Use byte length for now
         
-        // Track character position across all lines
-        let mut total_char_offset = 0;
+        // Process matches by line
         let mut y = adjusted_pos.1 - self.scroll_y;
         
-        for (line_i, run) in buffer.layout_runs().enumerate() {
-            let line_start = total_char_offset;
-            let line_end = total_char_offset + run.text.len();
+        for (line_idx, layout_run) in buffer.layout_runs().enumerate() {
+            // Get the actual line text from the buffer
+            let line = &buffer.lines[line_idx];
+            let line_text = line.text();
             
             // Check each match to see if it's on this line
-            for (match_idx, (_, _, _, cumulative_offset)) in &element_matches {
-                let match_start = *cumulative_offset;
-                let match_end = match_start + query_len;
+            for (match_idx, (_, match_line_idx, byte_offset)) in &element_matches {
+                if *match_line_idx != line_idx {
+                    continue; // This match is on a different line
+                }
                 
-                // Check if this match is on the current line
-                if match_start < line_end && match_end > line_start {
-                    // Calculate relative positions within this line
-                    let start_in_line = match_start.saturating_sub(line_start);
-                    let end_in_line = (match_end).min(line_end) - line_start;
+                // Calculate character positions from byte offset
+                // We need to convert byte offset to character offset for cursor positioning
+                let char_start = line_text[..*byte_offset].chars().count();
+                let char_end = char_start + search_query.chars().count();
+                
+                // Create cursors for the match range
+                let start_cursor = Cursor::new_with_affinity(
+                    line_idx,
+                    char_start,
+                    Affinity::After
+                );
+                let end_cursor = Cursor::new_with_affinity(
+                    line_idx,
+                    char_end,
+                    Affinity::Before
+                );
+                
+                // Use layout_run.highlight() to get exact position and width
+                if let Some((highlight_x, highlight_w)) = layout_run.highlight(start_cursor, end_cursor) {
+                    let is_current = Some(*match_idx) == current_match;
+                    let color = if is_current {
+                        [0.0, 1.0, 0.0, 0.4] // Green for current match
+                    } else {
+                        [1.0, 0.8, 0.0, 0.3] // Orange for other matches
+                    };
                     
-                    // Create cursors for the match range
-                    let start_cursor = Cursor::new_with_affinity(
-                        line_i,
-                        start_in_line,
-                        Affinity::After
-                    );
-                    let end_cursor = Cursor::new_with_affinity(
-                        line_i,
-                        end_in_line,
-                        Affinity::Before
-                    );
-                    
-                    // Use line.highlight() to get exact position and width
-                    if let Some((highlight_x, highlight_w)) = run.highlight(start_cursor, end_cursor) {
-                        let is_current = Some(*match_idx) == current_match;
-                        let color = if is_current {
-                            [0.0, 1.0, 0.0, 0.4] // Green for current match
-                        } else {
-                            [1.0, 0.8, 0.0, 0.3] // Orange for other matches
-                        };
-                        
-                        highlight_rects.push((
-                            Rect::new(
-                                (adjusted_pos.0 + highlight_x, y),
-                                (highlight_w, line_height),
-                            ),
-                            color,
-                        ));
-                    }
+                    highlight_rects.push((
+                        Rect::new(
+                            (adjusted_pos.0 + highlight_x, y),
+                            (highlight_w, line_height),
+                        ),
+                        color,
+                    ));
                 }
             }
             
-            total_char_offset = line_end;
             y += line_height;
         }
         
@@ -333,7 +331,7 @@ impl Renderer {
     fn draw_search_highlights_with_tables(
         &mut self,
         elements: &[Positioned<Element>],
-        search_matches: &[(usize, usize, usize, usize)],
+        search_matches: &[(usize, usize, usize)],
         current_match: Option<usize>,
         search_query: &str,
     ) -> anyhow::Result<()> {
@@ -417,7 +415,7 @@ impl Renderer {
     fn draw_search_highlights(
         &mut self,
         elements: &[Positioned<Element>],
-        search_matches: &[(usize, usize, usize, usize)],
+        search_matches: &[(usize, usize, usize)],
         current_match: Option<usize>,
         search_query: &str,
     ) -> anyhow::Result<()> {
@@ -1135,11 +1133,11 @@ impl Renderer {
     }
 
     pub fn redraw(
-        &mut self,
+        &mut self, 
         elements: &mut [Positioned<Element>],
         selection: &mut Selection,
         search_active: bool,
-        search_matches: &[(usize, usize, usize, usize)],
+        search_matches: &[(usize, usize, usize)],
         current_match: Option<usize>,
         search_query: &str,
         total_matches: usize,
@@ -1194,7 +1192,7 @@ impl Renderer {
             let mut text_cache = self.text_system.text_cache.lock();
             let text_areas: Vec<TextArea> = cached_text_areas
                 .iter()
-                .map(|c| c.text_area(&text_cache))
+                .map(|c| c.text_area(&*text_cache))
                 .collect();
 
             self.text_system.text_renderer.prepare(
@@ -1209,6 +1207,7 @@ impl Renderer {
                 text_areas,
                 &mut self.text_system.swash_cache,
             )?;
+
             text_cache.trim();
         }
 

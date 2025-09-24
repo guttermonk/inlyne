@@ -746,22 +746,24 @@ impl TextCache {
         self.entries.get(key)
     }
 
+    pub fn calculate_hash(&self, key: &Key<'_>) -> KeyHash {
+        let mut hasher = self.hasher.build_hasher();
+
+        key.lines.hash(&mut hasher);
+        key.size.to_bits().hash(&mut hasher);
+        key.line_height.to_bits().hash(&mut hasher);
+        key.bounds.0.to_bits().hash(&mut hasher);
+        key.bounds.1.to_bits().hash(&mut hasher);
+
+        hasher.finish()
+    }
+
     pub fn allocate(
         &mut self,
         font_system: &mut glyphon::FontSystem,
         key: Key<'_>,
     ) -> (KeyHash, &mut glyphon::Buffer) {
-        let hash = {
-            let mut hasher = self.hasher.build_hasher();
-
-            key.lines.hash(&mut hasher);
-            key.size.to_bits().hash(&mut hasher);
-            key.line_height.to_bits().hash(&mut hasher);
-            key.bounds.0.to_bits().hash(&mut hasher);
-            key.bounds.1.to_bits().hash(&mut hasher);
-
-            hasher.finish()
-        };
+        let hash = self.calculate_hash(&key);
 
         if let hash_map::Entry::Vacant(entry) = self.entries.entry(hash) {
             let metrics = glyphon::Metrics::new(key.size, key.line_height);
