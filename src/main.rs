@@ -9,6 +9,9 @@
     clippy::print_stdout, clippy::print_stderr,
 )]
 
+use unicode_normalization::UnicodeNormalization;
+use unicode_segmentation::UnicodeSegmentation;
+
 mod clipboard;
 pub mod color;
 mod debug_impls;
@@ -673,7 +676,11 @@ impl Inlyne {
         }
         
         self.search_matches.clear();
-        let query_lower = self.search_query.to_lowercase();
+        // Normalize the search query for consistent Unicode handling
+        let query_normalized = self.search_query.nfc().collect::<String>();
+        let query_lower = query_normalized.to_lowercase();
+        // Also get grapheme count for the query for accurate positioning
+        let _query_grapheme_count = query_lower.graphemes(true).count();
         
         // Collect search results in a temporary vector to avoid borrow issues
         let mut temp_matches = Vec::new();
@@ -695,14 +702,24 @@ impl Inlyne {
                     // Search within the buffer's actual laid-out lines
                     for (line_idx, buffer_line) in buffer.lines.iter().enumerate() {
                         let line_text = buffer_line.text();
-                        let line_lower = line_text.to_lowercase();
+                        // Normalize the line text for consistent Unicode handling
+                        let line_normalized = line_text.nfc().collect::<String>();
+                        let line_lower = line_normalized.to_lowercase();
                         
-                        // Find all occurrences in this line
-                        let mut start = 0;
-                        while let Some(pos) = line_lower[start..].find(&query_lower) {
-                            let byte_offset = start + pos;
-                            matches.push((elem_idx, line_idx, byte_offset));
-                            start = byte_offset + query_lower.len();
+                        // Find all occurrences in this line using grapheme-aware search
+                        let mut byte_start = 0;
+                        while let Some(byte_pos) = line_lower[byte_start..].find(&query_lower) {
+                            let absolute_byte_pos = byte_start + byte_pos;
+                            
+                            // Verify this is a grapheme boundary
+                            let before = &line_lower[..absolute_byte_pos];
+                            let is_grapheme_boundary = before.graphemes(true).count() == 
+                                                       before.chars().count();
+                            
+                            if is_grapheme_boundary {
+                                matches.push((elem_idx, line_idx, absolute_byte_pos));
+                            }
+                            byte_start = absolute_byte_pos + query_lower.len();
                         }
                     }
                     return; // Successfully searched in buffer
@@ -719,11 +736,21 @@ impl Inlyne {
                 for ch in text.text.chars() {
                     if ch == '\n' {
                         // Search in the completed line
-                        let line_lower = current_line.to_lowercase();
-                        let mut start = 0;
-                        while let Some(pos) = line_lower[start..].find(&query_lower) {
-                            matches.push((elem_idx, line_idx, start + pos));
-                            start = start + pos + query_lower.len();
+                        let line_normalized = current_line.nfc().collect::<String>();
+                        let line_lower = line_normalized.to_lowercase();
+                        let mut byte_start = 0;
+                        while let Some(byte_pos) = line_lower[byte_start..].find(&query_lower) {
+                            let absolute_byte_pos = byte_start + byte_pos;
+                            
+                            // Verify this is a grapheme boundary
+                            let before = &line_lower[..absolute_byte_pos];
+                            let is_grapheme_boundary = before.graphemes(true).count() == 
+                                                       before.chars().count();
+                            
+                            if is_grapheme_boundary {
+                                matches.push((elem_idx, line_idx, absolute_byte_pos));
+                            }
+                            byte_start = absolute_byte_pos + query_lower.len();
                         }
                         current_line.clear();
                         line_idx += 1;
@@ -735,11 +762,21 @@ impl Inlyne {
             
             // Don't forget the last line if it doesn't end with newline
             if !current_line.is_empty() {
-                let line_lower = current_line.to_lowercase();
-                let mut start = 0;
-                while let Some(pos) = line_lower[start..].find(&query_lower) {
-                    matches.push((elem_idx, line_idx, start + pos));
-                    start = start + pos + query_lower.len();
+                let line_normalized = current_line.nfc().collect::<String>();
+                let line_lower = line_normalized.to_lowercase();
+                let mut byte_start = 0;
+                while let Some(byte_pos) = line_lower[byte_start..].find(&query_lower) {
+                    let absolute_byte_pos = byte_start + byte_pos;
+                    
+                    // Verify this is a grapheme boundary
+                    let before = &line_lower[..absolute_byte_pos];
+                    let is_grapheme_boundary = before.graphemes(true).count() == 
+                                               before.chars().count();
+                    
+                    if is_grapheme_boundary {
+                        matches.push((elem_idx, line_idx, absolute_byte_pos));
+                    }
+                    byte_start = absolute_byte_pos + query_lower.len();
                 }
             }
         };

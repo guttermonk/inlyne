@@ -235,7 +235,7 @@ impl Renderer {
         current_match: Option<usize>,
         actual_bounds: Option<Size>,
     ) -> Vec<(Rect, [f32; 4])> {
-        use glyphon::{Cursor, Affinity};
+        use unicode_normalization::UnicodeNormalization;
         
         let mut highlight_rects = Vec::new();
         
@@ -270,42 +270,74 @@ impl Renderer {
         
         // Get line height from buffer metrics
         let line_height = buffer.metrics().line_height;
-        let _query_len = search_query.len(); // Use byte length for now
+        // Normalize the search query for consistent Unicode handling
+        let query_normalized = search_query.nfc().collect::<String>();
+        let query_lower = query_normalized.to_lowercase();
         
-        // Process matches by line
+        // Search directly in the rendered glyphs
         let mut y = adjusted_pos.1 - self.scroll_y;
         
-        for (line_idx, layout_run) in buffer.layout_runs().enumerate() {
-            // Get the actual line text from the buffer
-            let line = &buffer.lines[line_idx];
-            let line_text = line.text();
+        // Collect all glyphs and their text from layout runs
+        for layout_run in buffer.layout_runs() {
+            // Build the text for this visual line from glyphs
+            let mut run_text = String::new();
+            let mut last_end = 0;
             
-            // Check each match to see if it's on this line
-            for (match_idx, (_, match_line_idx, byte_offset)) in &element_matches {
-                if *match_line_idx != line_idx {
-                    continue; // This match is on a different line
+            for glyph in &layout_run.glyphs {
+                // Get the text for this glyph from the buffer
+                if glyph.start >= last_end {
+                    // Find which buffer line this glyph belongs to
+                    for line in &buffer.lines {
+                        let line_text = line.text();
+                        if glyph.end <= line_text.len() {
+                            run_text.push_str(&line_text[glyph.start..glyph.end]);
+                            last_end = glyph.end;
+                            break;
+                        }
+                    }
+                }
+            }
+            
+            // Normalize and search in this visual line's text
+            let run_normalized = run_text.nfc().collect::<String>();
+            let run_lower = run_normalized.to_lowercase();
+            
+            // Find all matches in this visual line
+            let mut search_pos = 0;
+            while let Some(match_pos) = run_lower[search_pos..].find(&query_lower) {
+                let match_start = search_pos + match_pos;
+                let match_end = match_start + query_lower.len();
+                
+                // Find the glyphs that correspond to this match
+                let mut highlight_start_x = None;
+                let mut highlight_end_x = None;
+                let mut accumulated_len = 0;
+                
+                for glyph in &layout_run.glyphs {
+                    let glyph_text_len = glyph.end - glyph.start;
+                    let glyph_start_in_run = accumulated_len;
+                    let glyph_end_in_run = accumulated_len + glyph_text_len;
+                    
+                    // Check if this glyph is part of the match
+                    if glyph_start_in_run < match_end && glyph_end_in_run > match_start {
+                        // This glyph overlaps with the match
+                        if highlight_start_x.is_none() {
+                            highlight_start_x = Some(glyph.x);
+                        }
+                        highlight_end_x = Some(glyph.x + glyph.w);
+                    }
+                    
+                    accumulated_len += glyph_text_len;
                 }
                 
-                // Calculate character positions from byte offset
-                // We need to convert byte offset to character offset for cursor positioning
-                let char_start = line_text[..*byte_offset].chars().count();
-                let char_end = char_start + search_query.chars().count();
-                
-                // Create cursors for the match range
-                let start_cursor = Cursor::new_with_affinity(
-                    line_idx,
-                    char_start,
-                    Affinity::After
-                );
-                let end_cursor = Cursor::new_with_affinity(
-                    line_idx,
-                    char_end,
-                    Affinity::Before
-                );
-                
-                // Use layout_run.highlight() to get exact position and width
-                if let Some((highlight_x, highlight_w)) = layout_run.highlight(start_cursor, end_cursor) {
-                    let is_current = Some(*match_idx) == current_match;
+                // Create highlight rectangle if we found the match
+                if let (Some(start_x), Some(end_x)) = (highlight_start_x, highlight_end_x) {
+                    // Check if this is the current match
+                    // Since we're searching directly in glyphs, we need to match by position
+                    let is_current = element_matches.iter().any(|(idx, _)| {
+                        Some(*idx) == current_match
+                    });
+                    
                     let color = if is_current {
                         [0.0, 1.0, 0.0, 0.4] // Green for current match
                     } else {
@@ -314,12 +346,14 @@ impl Renderer {
                     
                     highlight_rects.push((
                         Rect::new(
-                            (adjusted_pos.0 + highlight_x, y),
-                            (highlight_w, line_height),
+                            (adjusted_pos.0 + start_x, y),
+                            (end_x - start_x, line_height),
                         ),
                         color,
                     ));
                 }
+                
+                search_pos = match_start + query_lower.len();
             }
             
             y += line_height;
@@ -549,6 +583,8 @@ impl Renderer {
                         self.scroll_y,
                     );
                     text_areas.push(areas.clone());
+                    
+                    // For code blocks, ensure we track them for search highlighting
                     if text_box.is_code_block || text_box.is_quote_block.is_some() {
                         let color = if let Some(bg_color) = text_box.background_color {
                             bg_color
