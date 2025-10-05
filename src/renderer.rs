@@ -283,7 +283,7 @@ impl Renderer {
             let mut run_text = String::new();
             let mut last_end = 0;
             
-            for glyph in &layout_run.glyphs {
+            for glyph in layout_run.glyphs {
                 // Get the text for this glyph from the buffer
                 if glyph.start >= last_end {
                     // Find which buffer line this glyph belongs to
@@ -313,7 +313,7 @@ impl Renderer {
                 let mut highlight_end_x = None;
                 let mut accumulated_len = 0;
                 
-                for glyph in &layout_run.glyphs {
+                for glyph in layout_run.glyphs {
                     let glyph_text_len = glyph.end - glyph.start;
                     let glyph_start_in_run = accumulated_len;
                     let glyph_end_in_run = accumulated_len + glyph_text_len;
