@@ -234,6 +234,7 @@ impl Renderer {
         elem_idx: usize,
         current_match: Option<usize>,
         actual_bounds: Option<Size>,
+        apply_scroll: bool,
     ) -> Vec<(Rect, [f32; 4])> {
         use unicode_normalization::UnicodeNormalization;
         
@@ -275,7 +276,12 @@ impl Renderer {
         let query_lower = query_normalized.to_lowercase();
         
         // Search directly in the rendered glyphs
-        let mut y = adjusted_pos.1 - self.scroll_y;
+        // Apply scroll offset only if requested (not for table cells which handle it separately)
+        let mut y = if apply_scroll {
+            adjusted_pos.1 - self.scroll_y
+        } else {
+            adjusted_pos.1
+        };
         
         // Collect all glyphs and their text from layout runs
         for layout_run in buffer.layout_runs() {
@@ -413,6 +419,7 @@ impl Renderer {
                                     for (col_idx, node) in node_row.iter().enumerate() {
                                         if let Some(text_box) = table_row.get(col_idx) {
                                             // Use the same accurate highlighting as regular text
+                                            // Apply scroll offset to cell position
                                             let cell_pos = (pos.0 + node.location.x, pos.1 + node.location.y);
                                             let cell_bounds = Some((node.size.width, node.size.height));
                                             
@@ -424,6 +431,7 @@ impl Renderer {
                                                 elem_idx,
                                                 current_match,
                                                 cell_bounds,
+                                                true, // Apply scroll offset for table cells
                                             );
                                             
                                             // Draw the highlights for this cell
@@ -472,6 +480,7 @@ impl Renderer {
                             elem_idx,
                             current_match,
                             None, // Regular text doesn't need specific bounds
+                            true, // Apply scroll offset
                         );
                         all_highlights.extend(highlights);
                     }
@@ -491,6 +500,7 @@ impl Renderer {
                                     elem_idx,
                                     current_match,
                                     None, // Regular text doesn't need specific bounds
+                                    true, // Apply scroll offset
                                 );
                                 all_highlights.extend(highlights);
                             }
@@ -521,6 +531,7 @@ impl Renderer {
                                     elem_idx,
                                     current_match,
                                     None, // Row elements typically don't need specific bounds
+                                    true, // Apply scroll offset
                                 );
                                 all_highlights.extend(highlights);
                             }
@@ -912,12 +923,12 @@ impl Renderer {
         let field_x = screen_size.0 - field_width - padding;
         let field_y = padding;
         
-        // Draw semi-transparent background
+        // Draw opaque background
         let bg_rect = Rect::new(
             (field_x, field_y),
             (field_width, field_height),
         );
-        let _ = self.draw_rectangle(bg_rect, [0.1, 0.1, 0.1, 0.9]);
+        let _ = self.draw_rectangle(bg_rect, [0.1, 0.1, 0.1, 1.0]);
         
         // Draw border
         let border_color = if total_matches > 0 {
