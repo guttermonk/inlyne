@@ -431,7 +431,7 @@ impl Renderer {
                                                 elem_idx,
                                                 current_match,
                                                 cell_bounds,
-                                                true, // Apply scroll offset for table cells
+                                                false, // Don't apply scroll offset - cell_pos is already adjusted
                                             );
                                             
                                             // Draw the highlights for this cell
