@@ -20,6 +20,11 @@ theme = "Auto"
 # lines-to-scroll = 4.5
 lines-to-scroll = 3.0
 
+# Show the status bar along the bottom of the window. It lists the keybinding
+# hints, and displays a link's URL while the cursor is over it.
+# Set to false to hide it and reclaim the space for the page.
+status-bar = true
+
 # [window]
 # position = [500, 200] #[x, y]
 # size = [600, 500] #[width, height]
@@ -53,6 +58,14 @@ scrollbar-width = 5
 # Scrollbar color
 # Example: scrollbar-color = 0x808080 for gray
 scrollbar-color = 0x4d4d4d
+# Background of the status bar. Leave unset to follow `background-color`, so
+# the bar blends into the window.
+# Example: status-bar-color = 0x1d2025
+# status-bar-color = 0x1d2025
+# Search field border: green when the query matches, red when it does not.
+# Before anything is typed the border uses `scrollbar-color`.
+# search-match-color = 0x3fb950
+# search-no-match-color = 0xf85149
 # Page margin in pixels (applied to both left and right sides)
 # Controls how much space to leave on the sides of the content
 # Example: page-margin = 50 for narrow margins, 150 for wide margins
@@ -89,6 +102,11 @@ header-color = 0x000000
 scrollbar-width = 5
 # Lighter scrollbar color for light theme
 scrollbar-color = 0xcccccc
+# Leave unset to follow `background-color`
+# Example: status-bar-color = 0xeef9fe
+# status-bar-color = 0xeef9fe
+# search-match-color = 0x2ea043
+# search-no-match-color = 0xcf222e
 # Same page margins for both themes
 page-margin = 100
 code-highlighter = "github"

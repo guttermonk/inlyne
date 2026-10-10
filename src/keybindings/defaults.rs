@@ -36,6 +36,11 @@ pub fn defaults() -> Vec<(Action, KeyCombo)> {
                 ctrl_or_command,
             )]),
         ),
+        // Reset zoom: Ctrl+0 / Command+0
+        (
+            Action::Zoom(Zoom::Reset),
+            KeyCombo(vec![ModifiedKey(Key::from(VirtKey::Key0), ctrl_or_command)]),
+        ),
         // Navigate to next file: Alt+Right
         (
             Action::History(HistDirection::Next),
@@ -97,6 +102,10 @@ pub fn defaults() -> Vec<(Action, KeyCombo)> {
             Action::Search,
             KeyCombo(vec![ModifiedKey(Key::from(VirtKey::F), ctrl_or_command)]),
         ),
+        // Search: / -- the vim/less/browser convention. Safe as a bare key
+        // because printable keys are only captured as query text once search
+        // is already open, and `?` (Shift+/) is Help, which is a distinct combo.
+        (Action::Search, KeyCombo::from(VirtKey::Slash)),
         // Next match: n (when searching)
         (Action::NextMatch, KeyCombo::from(VirtKey::N)),
         // Next match: Enter (when searching)
@@ -107,6 +116,14 @@ pub fn defaults() -> Vec<(Action, KeyCombo)> {
         (
             Action::PrevMatch,
             KeyCombo(vec![ModifiedKey(Key::from(VirtKey::N), ModifiersState::SHIFT)]),
+        ),
+        // Previous match: Shift+Enter (mirrors Enter for next)
+        (
+            Action::PrevMatch,
+            KeyCombo(vec![ModifiedKey(
+                Key::from(VirtKey::Return),
+                ModifiersState::SHIFT,
+            )]),
         ),
         // Previous match: Shift+Tab (when searching)
         (

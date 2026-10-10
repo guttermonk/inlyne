@@ -33,6 +33,11 @@ pub struct OptionalTheme {
     pub scrollbar_width: Option<u32>,
     pub scrollbar_color: Option<u32>,
     pub page_margin: Option<u32>,
+    /// Omit to let the status bar follow `background-color`.
+    pub status_bar_color: Option<u32>,
+    /// Search field border when the query has matches / has none.
+    pub search_match_color: Option<u32>,
+    pub search_no_match_color: Option<u32>,
     pub code_highlighter: Option<color::SyntaxTheme>,
 }
 
@@ -55,6 +60,12 @@ impl OptionalTheme {
             scrollbar_width: self.scrollbar_width.unwrap_or(other.scrollbar_width),
             scrollbar_color: self.scrollbar_color.unwrap_or(other.scrollbar_color),
             page_margin: self.page_margin.unwrap_or(other.page_margin),
+            // Stays `None` when unset so the bar keeps following the background.
+            status_bar_color: self.status_bar_color.or(other.status_bar_color),
+            search_match_color: self.search_match_color.unwrap_or(other.search_match_color),
+            search_no_match_color: self
+                .search_no_match_color
+                .unwrap_or(other.search_no_match_color),
             code_highlighter,
         })
     }
@@ -72,6 +83,22 @@ impl From<LinesToScroll> for f32 {
 impl Default for LinesToScroll {
     fn default() -> Self {
         Self(3.0)
+    }
+}
+
+/// Whether the bottom status bar is shown. Defaults to shown.
+#[derive(Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
+pub struct StatusBar(pub bool);
+
+impl From<StatusBar> for bool {
+    fn from(value: StatusBar) -> Self {
+        value.0
+    }
+}
+
+impl Default for StatusBar {
+    fn default() -> Self {
+        Self(true)
     }
 }
 
@@ -117,6 +144,9 @@ pub struct Config {
     pub keybindings: KeybindingsSection,
     pub debug: DebugSection,
     pub window: Option<Window>,
+    /// Whether to show the status bar along the bottom of the window.
+    /// Defaults to shown; set `status-bar = false` to hide it.
+    pub status_bar: StatusBar,
 }
 
 impl Config {
@@ -166,6 +196,66 @@ impl Config {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn status_bar_color_is_optional_and_follows_background() {
+        // Unset: stays `None` so the renderer falls back to `background_color`,
+        // including a customised one.
+        let config =
+            Config::load_from_str("[dark-theme]\nbackground-color = 0x102030\n").unwrap();
+        let theme = config
+            .dark_theme
+            .unwrap()
+            .merge(color::Theme::dark_default())
+            .unwrap();
+        assert_eq!(theme.background_color, 0x102030);
+        assert_eq!(theme.status_bar_color, None);
+
+        // Set: overrides, leaving the background alone.
+        let config = Config::load_from_str(
+            "[dark-theme]\nbackground-color = 0x102030\nstatus-bar-color = 0xaa3366\n",
+        )
+        .unwrap();
+        let theme = config
+            .dark_theme
+            .unwrap()
+            .merge(color::Theme::dark_default())
+            .unwrap();
+        assert_eq!(theme.background_color, 0x102030);
+        assert_eq!(theme.status_bar_color, Some(0xaa3366));
+
+        // A bad value must be rejected, not silently dropped as an unknown key.
+        assert!(Config::load_from_str("[dark-theme]\nstatus-bar-color = \"blue\"\n").is_err());
+    }
+
+    /// Match/no-match colours come from the palette and are overridable,
+    /// so a theme can restyle the search field without a code change.
+    #[test]
+    fn search_border_colors_are_themeable() {
+        let defaults = color::Theme::dark_default();
+        assert_ne!(defaults.search_match_color, defaults.search_no_match_color);
+
+        let config = Config::load_from_str(
+            "[dark-theme]\nsearch-match-color = 0x112233\nsearch-no-match-color = 0x445566\n",
+        )
+        .unwrap();
+        let theme = config
+            .dark_theme
+            .unwrap()
+            .merge(color::Theme::dark_default())
+            .unwrap();
+        assert_eq!(theme.search_match_color, 0x112233);
+        assert_eq!(theme.search_no_match_color, 0x445566);
+
+        // Unset falls back to the theme default, not to zero.
+        let config = Config::load_from_str("[dark-theme]\n").unwrap();
+        let theme = config
+            .dark_theme
+            .unwrap()
+            .merge(color::Theme::dark_default())
+            .unwrap();
+        assert_eq!(theme.search_match_color, defaults.search_match_color);
+    }
 
     #[test]
     fn defaults_file_is_in_sync() {

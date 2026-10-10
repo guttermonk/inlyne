@@ -26,6 +26,10 @@ use wgpu::util::DeviceExt;
 use wgpu::{BindGroup, Buffer, IndexFormat, MultisampleState, TextureFormat};
 use winit::window::Window;
 
+/// Separator between hint groups in the status bar. Shared so the renderer can
+/// split the text back into groups when it has to shorten it to fit.
+pub const STATUS_BAR_SEPARATOR: &str = "  │  ";
+
 #[repr(C)]
 #[derive(Clone, Copy, Pod, Zeroable, Debug)]
 pub struct Vertex {
@@ -43,6 +47,10 @@ pub struct Renderer {
     pub text_system: TextSystem,
     pub scroll_y: f32,
     pub lyon_buffer: VertexBuffers<Vertex, u16>,
+    /// Geometry for overlays drawn on top of the page, i.e. the status bar
+    /// background. Kept separate from `lyon_buffer` because everything in that
+    /// one is drawn before any text.
+    pub overlay_lyon_buffer: VertexBuffers<Vertex, u16>,
     pub hidpi_scale: f32,
     pub page_width: f32,
     pub image_renderer: ImageRenderer,
@@ -50,6 +58,9 @@ pub struct Renderer {
     pub zoom: f32,
     pub positioner: Positioner,
     pub element_padding: f32,
+    /// Whether the bottom status bar is drawn. When false the bar takes up no
+    /// space at all, so scrolling behaves as it did before the bar existed.
+    pub status_bar_visible: bool,
 }
 
 impl Renderer {
@@ -160,16 +171,20 @@ impl Renderer {
         let mut text_atlas = TextAtlas::new(&device, &queue, surface_format);
         let text_renderer =
             TextRenderer::new(&mut text_atlas, &device, MultisampleState::default(), None);
+        let overlay_text_renderer =
+            TextRenderer::new(&mut text_atlas, &device, MultisampleState::default(), None);
         let text_cache = Arc::new(Mutex::new(TextCache::new()));
         let text_system = TextSystem {
             font_system,
             swash_cache,
             text_renderer,
+            overlay_text_renderer,
             text_atlas,
             text_cache,
         };
 
         let lyon_buffer: VertexBuffers<Vertex, u16> = VertexBuffers::new();
+        let overlay_lyon_buffer: VertexBuffers<Vertex, u16> = VertexBuffers::new();
 
         let positioner = Positioner::new(window.inner_size().into(), hidpi_scale, page_width, theme.page_margin as f32);
         Ok(Self {
@@ -182,6 +197,7 @@ impl Renderer {
             text_system,
             scroll_y: 0.,
             lyon_buffer,
+            overlay_lyon_buffer,
             hidpi_scale,
             page_width,
             zoom: 1.,
@@ -189,6 +205,7 @@ impl Renderer {
             theme,
             positioner,
             element_padding: DEFAULT_PADDING,
+            status_bar_visible: true,
         })
     }
 
@@ -275,96 +292,83 @@ impl Renderer {
         let query_normalized = search_query.nfc().collect::<String>();
         let query_lower = query_normalized.to_lowercase();
         
-        // Search directly in the rendered glyphs
-        // Apply scroll offset only if requested (not for table cells which handle it separately)
-        let mut y = if apply_scroll {
+        // Apply scroll offset only if requested (not for table cells which
+        // handle it separately).
+        let y_origin = if apply_scroll {
             adjusted_pos.1 - self.scroll_y
         } else {
             adjusted_pos.1
         };
-        
-        // Collect all glyphs and their text from layout runs
+
         for layout_run in buffer.layout_runs() {
-            // Build the text for this visual line from glyphs
-            let mut run_text = String::new();
-            let mut last_end = 0;
-            
-            for glyph in layout_run.glyphs {
-                // Get the text for this glyph from the buffer
-                if glyph.start >= last_end {
-                    // Find which buffer line this glyph belongs to
-                    for line in &buffer.lines {
-                        let line_text = line.text();
-                        if glyph.end <= line_text.len() {
-                            run_text.push_str(&line_text[glyph.start..glyph.end]);
-                            last_end = glyph.end;
-                            break;
-                        }
-                    }
-                }
-            }
-            
-            // Normalize and search in this visual line's text
-            let run_normalized = run_text.nfc().collect::<String>();
-            let run_lower = run_normalized.to_lowercase();
-            
-            // Find all matches in this visual line
+            // `LayoutRun::text` is the whole *logical* line, and glyph
+            // `start`/`end` are byte offsets into it. A wrapped line produces
+            // several runs that share this text but each carry only their own
+            // glyphs, so a match belonging to another visual line simply finds
+            // no overlapping glyphs here and is skipped.
+            //
+            // The previous version rebuilt this text by scanning every buffer
+            // line for the first one long enough to contain the glyph's byte
+            // range, which pulled characters from unrelated lines and placed
+            // highlights at meaningless offsets.
+            let line_lower = layout_run.text.to_lowercase();
+
+            // Vertical position comes from the run itself rather than being
+            // accumulated, which was wrong as soon as a line wrapped.
+            let run_y = y_origin + layout_run.line_top;
+
             let mut search_pos = 0;
-            while let Some(match_pos) = run_lower[search_pos..].find(&query_lower) {
-                let match_start = search_pos + match_pos;
+            while let Some(found) = line_lower[search_pos..].find(&query_lower) {
+                let match_start = search_pos + found;
                 let match_end = match_start + query_lower.len();
-                
-                // Find the glyphs that correspond to this match
-                let mut highlight_start_x = None;
-                let mut highlight_end_x = None;
-                let mut accumulated_len = 0;
-                
+                search_pos = match_end;
+
+                // Span the glyphs overlapping this byte range.
+                let mut start_x = None;
+                let mut end_x = None;
                 for glyph in layout_run.glyphs {
-                    let glyph_text_len = glyph.end - glyph.start;
-                    let glyph_start_in_run = accumulated_len;
-                    let glyph_end_in_run = accumulated_len + glyph_text_len;
-                    
-                    // Check if this glyph is part of the match
-                    if glyph_start_in_run < match_end && glyph_end_in_run > match_start {
-                        // This glyph overlaps with the match
-                        if highlight_start_x.is_none() {
-                            highlight_start_x = Some(glyph.x);
+                    if glyph.start < match_end && glyph.end > match_start {
+                        if start_x.is_none() {
+                            start_x = Some(glyph.x);
                         }
-                        highlight_end_x = Some(glyph.x + glyph.w);
+                        end_x = Some(glyph.x + glyph.w);
                     }
-                    
-                    accumulated_len += glyph_text_len;
                 }
-                
-                // Create highlight rectangle if we found the match
-                if let (Some(start_x), Some(end_x)) = (highlight_start_x, highlight_end_x) {
-                    // Check if this is the current match
-                    // Since we're searching directly in glyphs, we need to match by position
-                    let is_current = element_matches.iter().any(|(idx, _)| {
-                        Some(*idx) == current_match
+
+                let (Some(start_x), Some(end_x)) = (start_x, end_x) else {
+                    // Match lives on a different visual line of this logical
+                    // line; its own run will draw it.
+                    continue;
+                };
+
+                // `search_matches` stores (element, logical line, byte offset),
+                // which identifies this match exactly -- so only the actual
+                // current match is coloured, rather than every match in the
+                // element whenever one of them happened to be current.
+                let is_current = current_match
+                    .and_then(|idx| search_matches.get(idx))
+                    .is_some_and(|&(match_elem, match_line, match_byte)| {
+                        match_elem == elem_idx
+                            && match_line == layout_run.line_i
+                            && match_byte == match_start
                     });
-                    
-                    let color = if is_current {
-                        [0.0, 1.0, 0.0, 0.4] // Green for current match
-                    } else {
-                        [1.0, 0.8, 0.0, 0.3] // Orange for other matches
-                    };
-                    
-                    highlight_rects.push((
-                        Rect::new(
-                            (adjusted_pos.0 + start_x, y),
-                            (end_x - start_x, line_height),
-                        ),
-                        color,
-                    ));
-                }
-                
-                search_pos = match_start + query_lower.len();
+
+                let color = if is_current {
+                    [0.0, 1.0, 0.0, 0.4] // Green for current match
+                } else {
+                    [1.0, 0.8, 0.0, 0.3] // Orange for other matches
+                };
+
+                highlight_rects.push((
+                    Rect::new(
+                        (adjusted_pos.0 + start_x, run_y),
+                        (end_x - start_x, line_height),
+                    ),
+                    color,
+                ));
             }
-            
-            y += line_height;
         }
-        
+
         highlight_rects
     }
 
@@ -383,74 +387,102 @@ impl Renderer {
         let screen_size = self.screen_size();
         let centering = (screen_size.0 - self.page_width).max(0.) / 2.;
         
+        // This walk must count element indices exactly as `perform_search`
+        // does, or a table's matches get attributed to the wrong cells. Two
+        // things used to break that: `Element::Row` was not counted at all
+        // (so any bullet list ahead of a table shifted every index), and the
+        // whole match was gated on `element.bounds`, which the search does not
+        // require. Both are handled below; only the drawing needs bounds.
         for element in elements.iter() {
-            if let Some(bounds) = &element.bounds {
-                let pos = bounds.pos;
-                
-                match &element.inner {
-                    Element::TextBox(_) => {
-                        elem_idx += 1;
-                    }
-                    Element::Section(section) => {
-                        for sub_element in section.elements.iter() {
-                            if let Element::TextBox(_) = &sub_element.inner {
-                                elem_idx += 1;
-                            }
+            match &element.inner {
+                Element::TextBox(_) => {
+                    elem_idx += 1;
+                }
+                Element::Section(section) => {
+                    for sub_element in section.elements.iter() {
+                        if let Element::TextBox(_) = &sub_element.inner {
+                            elem_idx += 1;
                         }
                     }
-                    Element::Table(table) => {
-                        // Calculate table layout to get cell positions
-                        let bounds = (
-                            (screen_size.0 - pos.0 - self.positioner.page_margin - centering).max(0.),
-                            f32::INFINITY,
-                        );
-                        
-                        let layout_result = table.layout(
-                            &mut self.text_system,
-                            &mut self.positioner.taffy,
-                            bounds,
-                            self.zoom,
-                        );
-                        
-                        if let std::result::Result::Ok(layout) = layout_result {
-                            // Check each table cell for matches
-                            for (row_idx, node_row) in layout.rows.iter().enumerate() {
-                                if let Some(table_row) = table.rows.get(row_idx) {
-                                    for (col_idx, node) in node_row.iter().enumerate() {
-                                        if let Some(text_box) = table_row.get(col_idx) {
-                                            // Use the same accurate highlighting as regular text
-                                            // Apply scroll offset to cell position
-                                            let cell_pos = (pos.0 + node.location.x, pos.1 + node.location.y);
-                                            let cell_bounds = Some((node.size.width, node.size.height));
-                                            
-                                            let highlights = self.calculate_highlight_rectangles(
-                                                text_box,
-                                                cell_pos,
-                                                search_query,
-                                                search_matches,
-                                                elem_idx,
-                                                current_match,
-                                                cell_bounds,
-                                                false, // Don't apply scroll offset - cell_pos is already adjusted
-                                            );
-                                            
-                                            // Draw the highlights for this cell
-                                            for (rect, color) in highlights {
-                                                self.draw_rectangle(rect, color)?;
-                                            }
-                                            
-                                            elem_idx += 1;
-                                        }
+                }
+                Element::Row(row) => {
+                    // Counted only to stay in step; their highlights are drawn
+                    // by `draw_search_highlights`.
+                    for cell in &row.elements {
+                        if let Element::TextBox(_) = &cell.inner {
+                            elem_idx += 1;
+                        }
+                    }
+                }
+                Element::Table(table) => {
+                    let cell_count: usize = table.rows.iter().map(|row| row.len()).sum();
+
+                    let Some(bounds) = &element.bounds else {
+                        // Not laid out yet, but the index still has to advance.
+                        elem_idx += cell_count;
+                        continue;
+                    };
+                    let pos = bounds.pos;
+
+                    // Calculate table layout to get cell positions
+                    let layout_bounds = (
+                        (screen_size.0 - pos.0 - self.positioner.page_margin - centering).max(0.),
+                        f32::INFINITY,
+                    );
+
+                    let layout_result = table.layout(
+                        &mut self.text_system,
+                        &mut self.positioner.taffy,
+                        layout_bounds,
+                        self.zoom,
+                    );
+
+                    let std::result::Result::Ok(layout) = layout_result else {
+                        elem_idx += cell_count;
+                        continue;
+                    };
+
+                    // Check each table cell for matches
+                    for (row_idx, node_row) in layout.rows.iter().enumerate() {
+                        if let Some(table_row) = table.rows.get(row_idx) {
+                            for (col_idx, node) in node_row.iter().enumerate() {
+                                if let Some(text_box) = table_row.get(col_idx) {
+                                    // Cell position is in document space, so
+                                    // the scroll offset has to come off here --
+                                    // `apply_scroll: false` below means the
+                                    // helper will not do it.
+                                    let cell_pos = (
+                                        pos.0 + node.location.x,
+                                        pos.1 + node.location.y - self.scroll_y,
+                                    );
+                                    let cell_bounds = Some((node.size.width, node.size.height));
+
+                                    let highlights = self.calculate_highlight_rectangles(
+                                        text_box,
+                                        cell_pos,
+                                        search_query,
+                                        search_matches,
+                                        elem_idx,
+                                        current_match,
+                                        cell_bounds,
+                                        false, // scroll already applied above
+                                    );
+
+                                    // Draw the highlights for this cell
+                                    for (rect, color) in highlights {
+                                        self.draw_rectangle(rect, color)?;
                                     }
+
+                                    elem_idx += 1;
                                 }
                             }
                         }
                     }
-                    _ => {}
                 }
+                _ => {}
             }
         }
-        
+
         Ok(())
     }
 
@@ -923,41 +955,52 @@ impl Renderer {
         let field_x = screen_size.0 - field_width - padding;
         let field_y = padding;
         
-        // Draw opaque background
+        // Background follows the theme, matching the status bar: unset means
+        // the window background, so the field sits in the same palette as the
+        // rest of the page instead of a hardcoded near-black.
         let bg_rect = Rect::new(
             (field_x, field_y),
             (field_width, field_height),
         );
-        let _ = self.draw_rectangle(bg_rect, [0.1, 0.1, 0.1, 1.0]);
-        
-        // Draw border
+        let field_bg = self
+            .theme
+            .status_bar_color
+            .unwrap_or(self.theme.background_color);
+        let _ = self.draw_overlay_rectangle(
+            bg_rect,
+            native_color(field_bg, &self.surface_format),
+        );
+
+        // Border signals match state: green for hits, red for none, and the
+        // neutral chrome grey before anything is typed. All three come from the
+        // palette so they can be themed.
         let border_color = if total_matches > 0 {
-            [0.0, 0.8, 0.0, 1.0] // Green when matches found
+            native_color(self.theme.search_match_color, &self.surface_format)
         } else if !search_query.is_empty() {
-            [0.8, 0.2, 0.0, 1.0] // Red when no matches
+            native_color(self.theme.search_no_match_color, &self.surface_format)
         } else {
-            [0.5, 0.5, 0.5, 1.0] // Gray when empty
+            native_color(self.theme.scrollbar_color, &self.surface_format)
         };
         
         // Draw border as thin rectangles
         let border_width = 2.0;
         // Top border
-        let _ = self.draw_rectangle(
+        let _ = self.draw_overlay_rectangle(
             Rect::new((field_x, field_y), (field_width, border_width)),
             border_color,
         );
         // Bottom border
-        let _ = self.draw_rectangle(
+        let _ = self.draw_overlay_rectangle(
             Rect::new((field_x, field_y + field_height - border_width), (field_width, border_width)),
             border_color,
         );
         // Left border
-        let _ = self.draw_rectangle(
+        let _ = self.draw_overlay_rectangle(
             Rect::new((field_x, field_y), (border_width, field_height)),
             border_color,
         );
         // Right border
-        let _ = self.draw_rectangle(
+        let _ = self.draw_overlay_rectangle(
             Rect::new((field_x + field_width - border_width, field_y), (border_width, field_height)),
             border_color,
         );
@@ -1032,6 +1075,148 @@ impl Renderer {
         text_areas
     }
 
+    /// Height of the persistent bottom status bar, in physical pixels.
+    /// Zero when the bar is hidden, so it costs no layout or scroll room.
+    pub fn status_bar_height(&self) -> f32 {
+        if self.status_bar_visible {
+            22.0 * self.hidpi_scale
+        } else {
+            0.
+        }
+    }
+
+    /// Draws the bottom status bar and returns its text area.
+    ///
+    /// `status_text` is whatever the caller wants shown there: the URL of the
+    /// link under the cursor when there is one, otherwise the keybinding hints.
+    /// An empty string draws nothing, which is how the bar is disabled.
+    fn render_status_bar(&mut self, status_text: &str) -> Vec<CachedTextArea> {
+        let mut text_areas = Vec::new();
+
+        if !self.status_bar_visible || status_text.is_empty() {
+            return text_areas;
+        }
+
+        let screen_size = self.screen_size();
+        let bar_height = self.status_bar_height();
+        let bar_y = screen_size.1 - bar_height;
+        let padding = 10.0 * self.hidpi_scale;
+        let font_size = 12.0 * self.hidpi_scale;
+        let line_height = font_size * 1.3;
+
+        // Background, plus a rule along the top edge so the bar reads as
+        // separate from the page rather than as more content. Unset, the bar
+        // takes the window background and blends in.
+        let bar_color = self
+            .theme
+            .status_bar_color
+            .unwrap_or(self.theme.background_color);
+        let _ = self.draw_overlay_rectangle(
+            Rect::new((0., bar_y), (screen_size.0, bar_height)),
+            native_color(bar_color, &self.surface_format),
+        );
+        let _ = self.draw_overlay_rectangle(
+            Rect::new((0., bar_y), (screen_size.0, self.hidpi_scale.max(1.))),
+            native_color(self.theme.scrollbar_color, &self.surface_format),
+        );
+
+        const STATUS_BAR_KEY: u64 = 0x57A7_0_5BA_0000_0001;
+
+        let text_color = {
+            let c = self.theme.text_color;
+            glyphon::Color::rgb((c >> 16) as u8, (c >> 8) as u8, c as u8)
+        };
+
+        use glyphon::{Attrs, Buffer, Metrics, Shaping};
+
+        // Width of the text actually shown, used below to centre it.
+        let mut shown_width = 0.;
+
+        {
+            let mut cache = self.text_system.text_cache.lock();
+
+            if !cache.entries.contains_key(&STATUS_BAR_KEY) {
+                let buffer = Buffer::new(
+                    &mut self.text_system.font_system.lock(),
+                    Metrics::new(font_size, line_height),
+                );
+                cache.store_search_buffer(STATUS_BAR_KEY, buffer);
+            }
+
+            if let Some(buffer) = cache.entries.get_mut(&STATUS_BAR_KEY) {
+                // Re-set the metrics every frame so the bar tracks DPI changes;
+                // the buffer outlives any one value of `hidpi_scale`.
+                buffer.set_metrics(
+                    &mut self.text_system.font_system.lock(),
+                    Metrics::new(font_size, line_height),
+                );
+                let avail_width = (screen_size.0 - padding * 2.).max(0.);
+                buffer.set_size(
+                    &mut self.text_system.font_system.lock(),
+                    avail_width,
+                    bar_height,
+                );
+                // One line only. Wrapping pushed the overflow onto a second
+                // line that the bar is too short to show, which is what left a
+                // dangling separator at the cut.
+                buffer.set_wrap(&mut self.text_system.font_system.lock(), glyphon::cosmic_text::Wrap::None);
+
+                let attrs = Attrs::new()
+                    .family(glyphon::Family::SansSerif)
+                    .color(text_color);
+
+                // Drop whole hint groups from the end until the line fits, so
+                // the bar degrades to fewer hints rather than a truncated one.
+                let mut shown = status_text;
+                loop {
+                    buffer.set_text(
+                        &mut self.text_system.font_system.lock(),
+                        shown,
+                        attrs,
+                        Shaping::Advanced,
+                    );
+                    buffer.shape_until_scroll(&mut self.text_system.font_system.lock());
+
+                    let line_w = buffer
+                        .layout_runs()
+                        .next()
+                        .map(|run| run.line_w)
+                        .unwrap_or(0.);
+
+                    if line_w <= avail_width {
+                        shown_width = line_w;
+                        break;
+                    }
+                    match shown.rfind(STATUS_BAR_SEPARATOR) {
+                        Some(cut) => shown = shown[..cut].trim_end(),
+                        // A single group that still overflows: leave it to be
+                        // clipped rather than render nothing.
+                        None => {
+                            shown_width = avail_width;
+                            break;
+                        }
+                    }
+                }
+            }
+
+            cache.recently_used.insert(STATUS_BAR_KEY);
+        }
+
+        // Centre the hints as a block. They are shortened to fit first, so the
+        // centred group is always the one actually being shown.
+        let text_x = ((screen_size.0 - shown_width) / 2.).max(padding);
+
+        text_areas.push(CachedTextArea::new(
+            STATUS_BAR_KEY,
+            text_x,
+            bar_y + (bar_height - line_height) / 2.,
+            glyphon::TextBounds::default(),
+            text_color,
+        ));
+
+        text_areas
+    }
+
     fn draw_rectangle(&mut self, rect: Rect, color: [f32; 4]) -> anyhow::Result<()> {
         let min = point(rect.pos.0, rect.pos.1, self.screen_size());
         let max = point(rect.max().0, rect.max().1, self.screen_size());
@@ -1040,6 +1225,23 @@ impl Renderer {
             &Box2D::new(Point2D::from(min), Point2D::from(max)),
             &FillOptions::default(),
             &mut BuffersBuilder::new(&mut self.lyon_buffer, |vertex: FillVertex| Vertex {
+                pos: [vertex.position().x, vertex.position().y, 0.0],
+                color,
+            }),
+        )?;
+        Ok(())
+    }
+
+    /// Same as [`Self::draw_rectangle`] but into the overlay buffer, which is
+    /// drawn after the page text instead of before it.
+    fn draw_overlay_rectangle(&mut self, rect: Rect, color: [f32; 4]) -> anyhow::Result<()> {
+        let min = point(rect.pos.0, rect.pos.1, self.screen_size());
+        let max = point(rect.max().0, rect.max().1, self.screen_size());
+        let mut fill_tessellator = FillTessellator::new();
+        fill_tessellator.tessellate_rectangle(
+            &Box2D::new(Point2D::from(min), Point2D::from(max)),
+            &FillOptions::default(),
+            &mut BuffersBuilder::new(&mut self.overlay_lyon_buffer, |vertex: FillVertex| Vertex {
                 pos: [vertex.position().x, vertex.position().y, 0.0],
                 color,
             }),
@@ -1188,6 +1390,7 @@ impl Renderer {
         current_match: Option<usize>,
         search_query: &str,
         total_matches: usize,
+        status_text: &str,
     ) -> anyhow::Result<()> {
         selection.text.clear();
         let frame = self
@@ -1204,7 +1407,9 @@ impl Renderer {
         // Prepare and render elements that use lyon
         self.lyon_buffer.indices.clear();
         self.lyon_buffer.vertices.clear();
-        
+        self.overlay_lyon_buffer.indices.clear();
+        self.overlay_lyon_buffer.vertices.clear();
+
         // Draw search highlights with proper query for width estimation
         if search_active && !search_matches.is_empty() {
             self.draw_search_highlights_with_tables(elements, search_matches, current_match, search_query)?;
@@ -1213,10 +1418,19 @@ impl Renderer {
         // Render elements
         let mut cached_text_areas = self.render_elements(elements, selection)?;
         
-        // Render search input field if search is active
-        let search_field_text = self.render_search_input_field(search_active, search_query, current_match, total_matches);
-        cached_text_areas.extend(search_field_text);
-        
+        // Both the search field and the status bar are overlays: their
+        // backgrounds go in the overlay geometry buffer and their text through
+        // the overlay text renderer, so they land on top of the page rather
+        // than under it. The search field used to share the page's buffers,
+        // which let page text paint straight through it.
+        let mut overlay_text_areas = self.render_search_input_field(
+            search_active,
+            search_query,
+            current_match,
+            total_matches,
+        );
+        overlay_text_areas.extend(self.render_status_bar(status_text));
+
         let vertex_buf = self
             .device
             .create_buffer_init(&wgpu::util::BufferInitDescriptor {
@@ -1231,6 +1445,20 @@ impl Renderer {
                 contents: bytemuck::cast_slice(&self.lyon_buffer.indices),
                 usage: wgpu::BufferUsages::INDEX,
             });
+        let overlay_vertex_buf =
+            self.device
+                .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                    label: Some("Overlay Vertex Buffer"),
+                    contents: bytemuck::cast_slice(&self.overlay_lyon_buffer.vertices),
+                    usage: wgpu::BufferUsages::VERTEX,
+                });
+        let overlay_index_buffer =
+            self.device
+                .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                    label: Some("Overlay Index Buffer"),
+                    contents: bytemuck::cast_slice(&self.overlay_lyon_buffer.indices),
+                    usage: wgpu::BufferUsages::INDEX,
+                });
 
         // Prepare image bind groups for drawing
         let image_bindgroups = self.image_bindgroups(elements);
@@ -1252,6 +1480,24 @@ impl Renderer {
                     height: self.config.height,
                 },
                 text_areas,
+                &mut self.text_system.swash_cache,
+            )?;
+
+            let overlay_areas: Vec<TextArea> = overlay_text_areas
+                .iter()
+                .map(|c| c.text_area(&*text_cache))
+                .collect();
+
+            self.text_system.overlay_text_renderer.prepare(
+                &self.device,
+                &self.queue,
+                &mut self.text_system.font_system.lock(),
+                &mut self.text_system.text_atlas,
+                glyphon::Resolution {
+                    width: self.config.width,
+                    height: self.config.height,
+                },
+                overlay_areas,
                 &mut self.text_system.swash_cache,
             )?;
 
@@ -1300,6 +1546,20 @@ impl Renderer {
                 .text_renderer
                 .render(&self.text_system.text_atlas, &mut rpass)
                 .unwrap();
+
+            // Overlays last: background over the page text, then the overlay's
+            // own text over that background.
+            if !self.overlay_lyon_buffer.indices.is_empty() {
+                rpass.set_pipeline(&self.render_pipeline);
+                rpass.set_vertex_buffer(0, overlay_vertex_buf.slice(..));
+                rpass.set_index_buffer(overlay_index_buffer.slice(..), wgpu::IndexFormat::Uint16);
+                rpass.draw_indexed(0..self.overlay_lyon_buffer.indices.len() as u32, 0, 0..1);
+            }
+
+            self.text_system
+                .overlay_text_renderer
+                .render(&self.text_system.text_atlas, &mut rpass)
+                .unwrap();
         }
 
         self.queue.submit(Some(encoder.finish()));
@@ -1319,9 +1579,12 @@ impl Renderer {
     }
 
     pub fn set_scroll_y(&mut self, scroll_y: f32) {
+        // The status bar paints over the bottom of the page, so allow scrolling
+        // that bit further; otherwise the last line could never clear it.
         self.scroll_y = scroll_y.clamp(
             0.,
-            (self.positioner.reserved_height - self.screen_height()).max(0.),
+            (self.positioner.reserved_height + self.status_bar_height() - self.screen_height())
+                .max(0.),
         )
     }
 }

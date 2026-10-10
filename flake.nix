@@ -30,11 +30,11 @@
           libxkbcommon
           
           # X11 dependencies
-          xorg.libX11
-          xorg.libXcursor
-          xorg.libXrandr
-          xorg.libXi
-          xorg.libXext
+          libx11
+          libxcursor
+          libxrandr
+          libxi
+          libxext
           
           # Graphics/GPU dependencies
           vulkan-loader
@@ -81,6 +81,16 @@
                 pkgs.wayland
                 pkgs.libxkbcommon
               ]}"
+
+            # Desktop entry, so inlyne shows up in launchers and can be set as
+            # the handler for markdown files. `Exec` is rewritten to the
+            # wrapped binary's absolute path: launchers do not necessarily
+            # share the shell's PATH, and the bare name would otherwise find
+            # an unwrapped binary (or none at all).
+            install -Dm644 assets/inlyne.desktop \
+              $out/share/applications/inlyne.desktop
+            substituteInPlace $out/share/applications/inlyne.desktop \
+              --replace-fail 'Exec=inlyne' "Exec=$out/bin/inlyne"
           '';
           
           meta = with pkgs.lib; {
@@ -112,7 +122,12 @@
           
           # Vulkan/GPU environment variables
           VK_LAYER_PATH = "${pkgs.vulkan-validation-layers}/share/vulkan/explicit_layer.d";
-          VK_ICD_FILENAMES = "${pkgs.vulkan-loader}/share/vulkan/icd.d/intel_icd.x86_64.json:${pkgs.vulkan-loader}/share/vulkan/icd.d/radeon_icd.x86_64.json";
+
+          # Deliberately no VK_ICD_FILENAMES: `vulkan-loader` ships no ICDs (they
+          # come from the graphics driver, e.g. mesa), so pointing at it left the
+          # loader with zero drivers. Unset, the loader discovers the host's ICDs
+          # under /run/opengl-driver/share/vulkan/icd.d, which is also what keeps
+          # the driver matched to the running kernel.
         };
         
         apps.default = flake-utils.lib.mkApp {

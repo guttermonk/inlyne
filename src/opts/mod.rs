@@ -74,6 +74,8 @@ pub struct Opts {
     pub position: Option<Position>,
     pub size: Option<Size>,
     pub element_padding: f32,
+    /// Whether the bottom status bar is shown.
+    pub status_bar: bool,
 }
 
 impl Opts {
@@ -117,6 +119,7 @@ impl Opts {
             keybindings,
             debug,
             window,
+            status_bar,
         } = config;
 
         let View {
@@ -180,6 +183,7 @@ impl Opts {
             position,
             size,
             element_padding: 2.0,
+            status_bar: status_bar.into(),
         })
     }
 

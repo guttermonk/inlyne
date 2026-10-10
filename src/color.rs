@@ -46,6 +46,14 @@ pub struct Theme {
     pub scrollbar_width: u32,
     pub scrollbar_color: u32,
     pub page_margin: u32,
+    /// Background of the bottom status bar. `None` means "follow
+    /// `background_color`", so the bar blends into the window unless the user
+    /// picks a colour -- and it keeps following a customised background.
+    pub status_bar_color: Option<u32>,
+    /// Search field border when the query has matches.
+    pub search_match_color: u32,
+    /// Search field border when the query has none.
+    pub search_no_match_color: u32,
     pub code_highlighter: SyntectTheme,
 }
 
@@ -68,6 +76,9 @@ impl Theme {
             scrollbar_width: 5,
             scrollbar_color: 0x4D4D4D,
             page_margin: 100,
+            status_bar_color: None,
+            search_match_color: 0x3FB950,
+            search_no_match_color: 0xF85149,
             code_highlighter,
         }
     }
@@ -90,6 +101,9 @@ impl Theme {
             scrollbar_width: 5,
             scrollbar_color: 0xCCCCCC,
             page_margin: 100,
+            status_bar_color: None,
+            search_match_color: 0x2EA043,
+            search_no_match_color: 0xCF222E,
             code_highlighter,
         }
     }

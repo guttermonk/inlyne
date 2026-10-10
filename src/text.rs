@@ -821,6 +821,10 @@ impl TextCache {
 pub struct TextSystem {
     pub font_system: Arc<Mutex<FontSystem>>,
     pub text_renderer: glyphon::TextRenderer,
+    /// Second renderer for overlay text (the status bar). All text in a single
+    /// renderer is drawn in one call, so overlay text needs its own in order to
+    /// be drawn after the page -- and after the overlay's own background.
+    pub overlay_text_renderer: glyphon::TextRenderer,
     pub text_atlas: glyphon::TextAtlas,
     pub text_cache: Arc<Mutex<TextCache>>,
     pub swash_cache: SwashCache,

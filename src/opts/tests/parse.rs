@@ -44,6 +44,7 @@ impl Opts {
             position: None,
             size: None,
             element_padding: 2.0,
+            status_bar: true,
         }
     }
 }

@@ -166,6 +166,27 @@ pub struct Inlyne {
     search_matches: Vec<(usize, usize, usize)>, // (element_index, line_index, byte_offset_in_line)
     current_match: Option<usize>,
     search_display_text: String,
+    /// URL of the link currently under the cursor, shown in the status bar.
+    hovered_link: Option<String>,
+    /// Set when a key press was consumed as a search-navigation command, so the
+    /// `ReceivedCharacter` that follows it isn't also typed into the query.
+    /// Winit emits `KeyboardInput` before `ReceivedCharacter` for a press, and
+    /// this is reset on every press, so it cannot leak to a later key.
+    suppress_next_char: bool,
+    /// Keybinding hints for the status bar. Derived from the user's actual
+    /// keybindings once at startup rather than hardcoded, so the hints stay
+    /// correct when those are customised.
+    status_bar_hints: String,
+    /// Hints shown instead while the help screen is open, where a different
+    /// set of keys applies.
+    status_bar_hints_help: String,
+    /// Hints shown while a search query is being typed.
+    status_bar_hints_search: String,
+    /// Hints shown once the search has been run and match-stepping is live.
+    status_bar_hints_search_nav: String,
+    /// Page movement that still works mid-query, appended to the search
+    /// hints so the bar keeps showing what the screen can still do.
+    status_bar_hints_search_extra: String,
 }
 
 impl Inlyne {
@@ -213,6 +234,7 @@ impl Inlyne {
         let event_loop_proxy = event_loop.create_proxy();
         // Set element padding from options
         renderer.element_padding = opts.element_padding;
+        renderer.status_bar_visible = opts.status_bar;
         
         let interpreter = HtmlInterpreter::new(
             window.clone(),
@@ -242,6 +264,16 @@ impl Inlyne {
 
         let _ = file_path.parent().map(std::env::set_current_dir);
 
+        // Built before `opts` is moved into the struct below.
+        let hint_keybindings: keybindings::Keybindings = opts.keybindings.clone().into();
+        let status_bar_hints = Self::build_status_bar_hints(&hint_keybindings);
+        let status_bar_hints_help = Self::build_help_status_bar_hints(&hint_keybindings);
+        let status_bar_hints_search = Self::build_search_status_bar_hints(&hint_keybindings);
+        let status_bar_hints_search_nav =
+            Self::build_search_nav_status_bar_hints(&hint_keybindings);
+        let status_bar_hints_search_extra =
+            Self::build_search_extra_hints(&hint_keybindings);
+
         Ok(Self {
             opts,
             window,
@@ -268,8 +300,369 @@ impl Inlyne {
             search_matches: Vec::new(),
             current_match: None,
             search_display_text: String::new(),
+            hovered_link: None,
+            suppress_next_char: false,
+            status_bar_hints,
+            status_bar_hints_help,
+            status_bar_hints_search,
+            status_bar_hints_search_nav,
+            status_bar_hints_search_extra,
         })
     }
+
+    /// The glyph a Shift-ed key actually produces, so a binding reads the way
+    /// it is typed: `?` rather than `Shift+/`, `G` rather than `Shift+g`.
+    ///
+    /// The punctuation half assumes a US layout, which is the same assumption
+    /// the stock config already makes when it writes `"G"` and documents Help
+    /// as `?`. Keys with no shifted form return `None` and fall back to the
+    /// plain `Shift+<key>` rendering.
+    fn shifted_glyph(virt_key: VirtualKeyCode) -> Option<&'static str> {
+        use VirtualKeyCode as K;
+        Some(match virt_key {
+            K::A => "A", K::B => "B", K::C => "C", K::D => "D", K::E => "E",
+            K::F => "F", K::G => "G", K::H => "H", K::I => "I", K::J => "J",
+            K::K => "K", K::L => "L", K::M => "M", K::N => "N", K::O => "O",
+            K::P => "P", K::Q => "Q", K::R => "R", K::S => "S", K::T => "T",
+            K::U => "U", K::V => "V", K::W => "W", K::X => "X", K::Y => "Y",
+            K::Z => "Z",
+            K::Key1 => "!", K::Key2 => "@", K::Key3 => "#", K::Key4 => "$",
+            K::Key5 => "%", K::Key6 => "^", K::Key7 => "&", K::Key8 => "*",
+            K::Key9 => "(", K::Key0 => ")",
+            K::Slash => "?",
+            K::Minus => "_",
+            K::Equals => "+",
+            K::LBracket => "{",
+            K::RBracket => "}",
+            K::Backslash => "|",
+            K::Semicolon => ":",
+            K::Apostrophe => "\"",
+            K::Comma => "<",
+            K::Period => ">",
+            K::Grave => "~",
+            _ => return None,
+        })
+    }
+
+    /// Formats a key combo for display in the status bar and help screen.
+    ///
+    /// `KeyCombo`'s `Display` wraps non-printing and modified keys in angle
+    /// brackets (`<Up>`, `<Ctrl+f>`) and runs chords together
+    /// (`Shift+zShift+q`), neither of which reads well. This strips the
+    /// brackets, spaces out chords, abbreviates long key names, and renders
+    /// Shift-ed keys as the glyph they produce.
+    fn format_key_combo(combo: &keybindings::KeyCombo) -> String {
+        let rendered = combo
+            .0
+            .iter()
+            .map(|modified_key| {
+                // Shift alone: show the glyph that key actually types.
+                if let ModifiedKey(Key::Resolved(virt_key), mods) = modified_key {
+                    if *mods == ModifiersState::SHIFT {
+                        if let Some(glyph) = Self::shifted_glyph(*virt_key) {
+                            return glyph.to_string();
+                        }
+                    }
+                }
+                format!("{}", modified_key)
+            })
+            .collect::<Vec<_>>()
+            .join(" ");
+        let stripped: String = rendered.chars().filter(|c| !matches!(c, '<' | '>')).collect();
+
+        for (long, short) in [
+            ("PageUp", "PgUp"),
+            ("PageDown", "PgDn"),
+            ("Escape", "Esc"),
+            ("Return", "Enter"),
+            ("Back", "Bksp"),
+        ] {
+            if stripped.contains(long) {
+                return stripped.replace(long, short);
+            }
+        }
+        stripped
+    }
+
+    /// How many alternative bindings per action the status bar will show. The
+    /// bar is one line, and some actions carry a lot of bindings (vim-style
+    /// chords especially); the help screen remains the full reference.
+    const MAX_HINT_ALTERNATIVES: usize = 2;
+
+    /// Whether a key press will also arrive as a `ReceivedCharacter`, i.e.
+    /// whether it would be typed into an open search query.
+    ///
+    /// Only such keys are ambiguous during search: binding `j` to NextMatch
+    /// would make "json" untypeable. Keys that never produce text -- Enter,
+    /// Tab, the arrows, F-keys, anything with Ctrl/Alt/Super -- can navigate
+    /// immediately without stealing input.
+    fn key_produces_text(
+        virtual_keycode: Option<VirtualKeyCode>,
+        modifiers: ModifiersState,
+    ) -> bool {
+        // Ctrl/Alt/Super combos don't emit characters.
+        if modifiers.ctrl() || modifiers.alt() || modifiers.logo() {
+            return false;
+        }
+
+        match virtual_keycode {
+            Some(
+                VirtualKeyCode::Return
+                | VirtualKeyCode::NumpadEnter
+                | VirtualKeyCode::Tab
+                | VirtualKeyCode::Escape
+                | VirtualKeyCode::Back
+                | VirtualKeyCode::Delete
+                | VirtualKeyCode::Insert
+                | VirtualKeyCode::Home
+                | VirtualKeyCode::End
+                | VirtualKeyCode::PageUp
+                | VirtualKeyCode::PageDown
+                | VirtualKeyCode::Up
+                | VirtualKeyCode::Down
+                | VirtualKeyCode::Left
+                | VirtualKeyCode::Right
+                | VirtualKeyCode::F1
+                | VirtualKeyCode::F2
+                | VirtualKeyCode::F3
+                | VirtualKeyCode::F4
+                | VirtualKeyCode::F5
+                | VirtualKeyCode::F6
+                | VirtualKeyCode::F7
+                | VirtualKeyCode::F8
+                | VirtualKeyCode::F9
+                | VirtualKeyCode::F10
+                | VirtualKeyCode::F11
+                | VirtualKeyCode::F12,
+            ) => false,
+            _ => true,
+        }
+    }
+
+    /// Whether a binding still fires while a search query is being typed.
+    /// Character-producing keys are swallowed by the query, so advertising
+    /// them in the search-mode hints would be wrong.
+    fn combo_works_during_search(combo: &keybindings::KeyCombo) -> bool {
+        match combo.0.first() {
+            Some(ModifiedKey(Key::Resolved(virt_key), mods)) => {
+                !Self::key_produces_text(Some(*virt_key), *mods)
+            }
+            // Scan-code bindings can't be classified; assume they type.
+            _ => false,
+        }
+    }
+
+    /// Like [`Self::keys_for`], but only the bindings that survive text entry.
+    fn keys_for_during_search(
+        keybindings: &keybindings::Keybindings,
+        want: Action,
+    ) -> Vec<String> {
+        keybindings
+            .iter()
+            .filter(|(action, combo)| {
+                *action == want && Self::combo_works_during_search(combo)
+            })
+            .map(|(_, combo)| Self::format_key_combo(combo))
+            .take(Self::MAX_HINT_ALTERNATIVES)
+            .collect()
+    }
+
+    /// Every key combo bound to `want`, in the order the user listed them.
+    fn keys_for(keybindings: &keybindings::Keybindings, want: Action) -> Vec<String> {
+        keybindings
+            .iter()
+            .filter(|(action, _)| *action == want)
+            .map(|(_, combo)| Self::format_key_combo(combo))
+            .take(Self::MAX_HINT_ALTERNATIVES)
+            .collect()
+    }
+
+    /// Hint for a direction pair, e.g. `Up/Down, i/e scroll`. Alternatives are
+    /// zipped positionally so each up key is shown beside its matching down
+    /// key, which is how they are listed in the config.
+    fn pair_hint(
+        keybindings: &keybindings::Keybindings,
+        up: Action,
+        down: Action,
+        label: &str,
+    ) -> Option<String> {
+        let ups = Self::keys_for(keybindings, up);
+        let downs = Self::keys_for(keybindings, down);
+        if ups.is_empty() && downs.is_empty() {
+            return None;
+        }
+
+        // Pair them off; any surplus on either side is listed on its own.
+        let paired: Vec<String> = ups
+            .iter()
+            .zip(downs.iter())
+            .map(|(u, d)| format!("{}/{}", u, d))
+            .chain(ups.iter().skip(downs.len()).cloned())
+            .chain(downs.iter().skip(ups.len()).cloned())
+            .collect();
+
+        Some(format!("{} {}", paired.join(", "), label))
+    }
+
+    /// Hint for a single action, listing every binding, e.g. `?/h help`.
+    fn single_hint(
+        keybindings: &keybindings::Keybindings,
+        action: Action,
+        label: &str,
+    ) -> Option<String> {
+        let keys = Self::keys_for(keybindings, action);
+        // Comma-separated, not slash: a slash would be ambiguous against both
+        // the up/down pairs and the `/` key itself.
+        (!keys.is_empty()).then(|| format!("{} {}", keys.join(", "), label))
+    }
+
+    /// Builds the keybinding hints shown in the status bar, e.g.
+    /// `Up/Down, i/e scroll │ PgUp/PgDn page │ Ctrl+f search │ ?/h help │ Esc quit`.
+    ///
+    /// Every binding for an action is listed, so custom keys show up alongside
+    /// the defaults rather than being hidden behind whichever came first.
+    fn build_status_bar_hints(keybindings: &keybindings::Keybindings) -> String {
+        let mut hints: Vec<String> = Vec::new();
+        hints.extend(Self::pair_hint(
+            keybindings,
+            Action::Scroll(VertDirection::Up),
+            Action::Scroll(VertDirection::Down),
+            "scroll",
+        ));
+        hints.extend(Self::pair_hint(
+            &keybindings,
+            Action::Page(VertDirection::Up),
+            Action::Page(VertDirection::Down),
+            "page",
+        ));
+        for (action, label) in [
+            (Action::Search, "search"),
+            (Action::Copy, "copy"),
+            (Action::Help, "help"),
+            (Action::Quit, "quit"),
+        ] {
+            hints.extend(Self::single_hint(&keybindings, action, label));
+        }
+
+        hints.join(crate::renderer::STATUS_BAR_SEPARATOR)
+    }
+
+    /// Hints for while search mode is active. The page keys don't apply --
+    /// typing goes into the query -- so only moving between matches and
+    /// leaving search are worth advertising.
+    fn build_search_status_bar_hints(keybindings: &keybindings::Keybindings) -> String {
+        // Only keys that survive text entry are listed: a character key bound
+        // to one of these is typed into the query instead of firing. Enter is
+        // what runs the query and lands on the first match.
+        let mut hints: Vec<String> = Vec::new();
+        let run_keys = Self::keys_for_during_search(keybindings, Action::NextMatch);
+        if run_keys.is_empty() {
+            hints.push("Enter run search".to_string());
+        } else {
+            hints.push(format!("{} run search", run_keys.join(", ")));
+        }
+        hints.push(Self::search_exit_hint(keybindings));
+
+        hints.join(crate::renderer::STATUS_BAR_SEPARATOR)
+    }
+
+    /// Hints for once a search has been run and match-stepping is live. Unlike
+    /// while typing, character keys bound to next/prev now work, so they are
+    /// listed too.
+    fn build_search_nav_status_bar_hints(keybindings: &keybindings::Keybindings) -> String {
+        let mut hints: Vec<String> = Vec::new();
+        for (action, label) in [
+            (Action::NextMatch, "next match"),
+            (Action::PrevMatch, "prev match"),
+        ] {
+            let keys = Self::keys_for(keybindings, action);
+            if !keys.is_empty() {
+                hints.push(format!("{} {}", keys.join(", "), label));
+            }
+        }
+        hints.push(Self::search_exit_hint(keybindings));
+
+        hints.join(crate::renderer::STATUS_BAR_SEPARATOR)
+    }
+
+    /// Page movement that still works while a query is being typed, i.e. keys
+    /// that emit no text. Appended to the search hints so the bar keeps showing
+    /// what the current screen can still do, rather than only search itself.
+    fn build_search_extra_hints(keybindings: &keybindings::Keybindings) -> String {
+        let mut hints: Vec<String> = Vec::new();
+        for (up, down, label) in [
+            (
+                Action::Scroll(VertDirection::Up),
+                Action::Scroll(VertDirection::Down),
+                "scroll",
+            ),
+            (
+                Action::Page(VertDirection::Up),
+                Action::Page(VertDirection::Down),
+                "page",
+            ),
+        ] {
+            let ups = Self::keys_for_during_search(keybindings, up);
+            let downs = Self::keys_for_during_search(keybindings, down);
+            if ups.is_empty() && downs.is_empty() {
+                continue;
+            }
+            let paired: Vec<String> = ups
+                .iter()
+                .zip(downs.iter())
+                .map(|(u, d)| format!("{}/{}", u, d))
+                .chain(ups.iter().skip(downs.len()).cloned())
+                .chain(downs.iter().skip(ups.len()).cloned())
+                .collect();
+            hints.push(format!("{} {}", paired.join(", "), label));
+        }
+
+        hints.join(crate::renderer::STATUS_BAR_SEPARATOR)
+    }
+
+    /// How to leave search. Exiting is never taken over by match-stepping, so
+    /// only keys that survive text entry qualify in either sub-state.
+    fn search_exit_hint(keybindings: &keybindings::Keybindings) -> String {
+        let mut exit_keys = Self::keys_for_during_search(keybindings, Action::CancelSearch);
+        exit_keys.extend(Self::keys_for_during_search(keybindings, Action::Quit));
+        exit_keys.extend(Self::keys_for_during_search(keybindings, Action::Search));
+        exit_keys.truncate(Self::MAX_HINT_ALTERNATIVES);
+        if exit_keys.is_empty() {
+            "Esc exit search".to_string()
+        } else {
+            format!("{} exit search", exit_keys.join(", "))
+        }
+    }
+
+    /// Hints for while the help screen is open. Only scrolling and closing do
+    /// anything there, and `Quit` closes the help rather than exiting, so
+    /// advertising "quit" would be wrong.
+    fn build_help_status_bar_hints(keybindings: &keybindings::Keybindings) -> String {
+        let mut hints: Vec<String> = Vec::new();
+        hints.extend(Self::pair_hint(
+            keybindings,
+            Action::Scroll(VertDirection::Up),
+            Action::Scroll(VertDirection::Down),
+            "scroll",
+        ));
+        hints.extend(Self::pair_hint(
+            keybindings,
+            Action::Page(VertDirection::Up),
+            Action::Page(VertDirection::Down),
+            "page",
+        ));
+
+        // Both the help key and the quit key close the help screen.
+        let mut close_keys = Self::keys_for(keybindings, Action::Help);
+        close_keys.extend(Self::keys_for(keybindings, Action::Quit));
+        close_keys.truncate(Self::MAX_HINT_ALTERNATIVES);
+        if !close_keys.is_empty() {
+            hints.push(format!("{} close help", close_keys.join(", ")));
+        }
+
+        hints.join(crate::renderer::STATUS_BAR_SEPARATOR)
+    }
+
 
     fn get_help_html(&self) -> String {
         use keybindings::action::{Action, HistDirection, VertDirection, Zoom};
@@ -295,21 +688,36 @@ impl Inlyne {
                 Action::History(HistDirection::Prev) => "Previous File",
                 Action::Copy => "Copy Selection",
                 Action::Help => "Toggle Help",
-                Action::Search => "Toggle Search",
+                // Not "Toggle Search": the key opens search, and `Cancel
+                // Search` below covers closing it, so "toggle" only muddies
+                // what the key is for.
+                Action::Search => "Search",
                 Action::CancelSearch => "Cancel Search",
                 Action::NextMatch => "Next Search Match",
                 Action::PrevMatch => "Previous Search Match",
                 Action::Quit => "Quit",
             };
             
-            let combo_str = format!("{}", combo);
+            // Same rendering as the status bar, so a binding is described
+            // identically wherever it appears: `?`, not `<Shift+/>`.
+            let combo_str = Self::format_key_combo(combo);
             action_map.entry(action_name.to_string())
                 .or_insert_with(Vec::new)
                 .push(combo_str);
         }
-        
+
+        // `CancelSearch` has no binding of its own: cancelling is done by the
+        // quit key, which closes the search instead of exiting while a search
+        // is open (see the `CancelSearch | Quit` arm in the key handler).
+        // Report what actually works rather than "Not configured".
+        if !action_map.contains_key("Cancel Search") {
+            if let Some(quit_keys) = action_map.get("Quit").cloned() {
+                action_map.insert("Cancel Search".to_string(), quit_keys);
+            }
+        }
+
         // Build HTML content - use table rows with section names to avoid spacer insertion
-        let mut content = String::from("<h1>⌨️ Keyboard Shortcuts</h1>\n\n");
+        let mut content = String::from("<h2>⌨️ Keyboard Shortcuts</h2>\n\n");
         
         // Debug: log the action map
         tracing::debug!("Help action_map has {} entries", action_map.len());
@@ -318,7 +726,7 @@ impl Inlyne {
         }
         
         // Navigation section
-        content.push_str("## Navigation\n| Action | Keys |\n");
+        content.push_str("### Navigation\n| Action | Keys |\n");
         content.push_str("|--------|------|\n");
         
         let nav_actions = [
@@ -342,7 +750,7 @@ impl Inlyne {
         content.push_str("\n");
         
         // Zoom section
-        content.push_str("## Zoom\n| Action | Keys |\n");
+        content.push_str("### Zoom\n| Action | Keys |\n");
         content.push_str("|--------|------|\n");
         
         let zoom_actions = ["Zoom In", "Zoom Out", "Reset Zoom"];
@@ -363,7 +771,7 @@ impl Inlyne {
         content.push_str("\n");
         
         // File Operations section
-        content.push_str("## File Operations\n| Action | Keys |\n");
+        content.push_str("### File Operations\n| Action | Keys |\n");
         content.push_str("|--------|------|\n");
         
         let file_actions = ["Next File", "Previous File", "Copy Selection"];
@@ -383,10 +791,34 @@ impl Inlyne {
         }
         content.push_str("\n");
         
-        // Application section
-        content.push_str("## Application\n| Action | Keys |\n");
+        // Search section
+        content.push_str("### Search\n| Action | Keys |\n");
         content.push_str("|--------|------|\n");
-        
+
+        let search_actions = [
+            "Search", "Next Search Match", "Previous Search Match",
+            "Cancel Search"
+        ];
+        for action in &search_actions {
+            content.push_str("| ");
+            content.push_str(action);
+            content.push_str(" | ");
+            if let Some(keys) = action_map.get(*action) {
+                for (i, key) in keys.iter().enumerate() {
+                    if i > 0 { content.push_str(" or "); }
+                    content.push_str(&format!("`{}`", key));
+                }
+            } else {
+                content.push_str("*Not configured*");
+            }
+            content.push_str(" |\n");
+        }
+        content.push_str("\n");
+
+        // Application section
+        content.push_str("### Application\n| Action | Keys |\n");
+        content.push_str("|--------|------|\n");
+
         let app_actions = ["Toggle Help", "Quit"];
         for action in &app_actions {
             content.push_str("| ");
@@ -404,10 +836,9 @@ impl Inlyne {
         }
         content.push_str("\n");
         
-        // Footer
-        content.push_str("---\n\n");
-        content.push_str("*Press any help key or `ESC` to close this help*\n");
-        
+        // No footer: the status bar carries the "how to close this" hint, and
+        // it lists the real keybindings rather than assuming the defaults.
+
         tracing::debug!("Generated help content length: {} chars", content.len());
         content
     }
@@ -574,12 +1005,27 @@ impl Inlyne {
         std::thread::spawn(move || help_interpreter.interpret_md(help_receiver));
         help_sender.send(help_content).unwrap();
         
+        // Existing matches index into the document's element list, which is
+        // being swapped out for the help screen's. Drop them so nothing is
+        // highlighted at the wrong place; typing re-runs the search against
+        // the help content once it has loaded.
+        self.clear_search_matches();
+
         // Reset scroll and positioning for help view
         self.renderer.scroll_y = 0.0;
         self.renderer.positioner.reserved_height = self.opts.element_padding * self.renderer.hidpi_scale;
         self.window.request_redraw();
     }
-    
+
+    /// Drops search results without leaving search mode. Used when the element
+    /// list being searched is replaced, since matches are stored as indices
+    /// into that list.
+    fn clear_search_matches(&mut self) {
+        self.search_matches.clear();
+        self.current_match = None;
+        self.search_navigating = false;
+    }
+
     fn hide_help(&mut self) {
         // Clear help elements
         self.help_elements.clear();
@@ -597,6 +1043,14 @@ impl Inlyne {
         }
         self.renderer.positioner.reserved_height = total_height;
         
+        // Same as in `show_help`, in the other direction. The document's
+        // elements are already loaded, so an active query can be re-run
+        // immediately against them.
+        self.clear_search_matches();
+        if self.search_active && !self.search_query.is_empty() {
+            self.perform_search();
+        }
+
         // Restore scroll position
         self.renderer.scroll_y = self.saved_scroll_y;
         self.window.request_redraw();
@@ -781,9 +1235,19 @@ impl Inlyne {
             }
         };
         
+        // Search whatever is actually on screen. The help screen renders its
+        // own element list in place of the document, and the highlights are
+        // drawn against that same list, so searching `self.elements` here
+        // would both match invisible text and misplace the highlights.
+        let searched_elements: &[Positioned<Element>] = if self.help_visible {
+            &self.help_elements
+        } else {
+            &self.elements
+        };
+
         // Search through all elements recursively
         let mut elem_count = 0;
-        for (_pos_idx, positioned_element) in self.elements.iter().enumerate() {
+        for (_pos_idx, positioned_element) in searched_elements.iter().enumerate() {
             match &positioned_element.inner {
                 Element::TextBox(text_box) => {
                     search_in_buffer(elem_count, text_box, Some(&self.renderer), &mut temp_matches);
@@ -822,18 +1286,19 @@ impl Inlyne {
         // Move results to search_matches
         self.search_matches = temp_matches;
         
-        // Set current match to first result
+        // Typing only stages the query; Enter executes it. Selecting a match
+        // here is what made the first Enter land on the *second* result,
+        // because `next_match` would advance off this one. Leaving it unset
+        // lets `next_match`'s `None => Some(0)` arm pick the first match.
+        self.current_match = None;
         if !self.search_matches.is_empty() {
-            self.current_match = Some(0);
-            self.jump_to_current_match();
-            // Update display with match count
-            self.search_display_text = format!("{} ({}/{})", 
-                self.search_query, 1, self.search_matches.len());
-        } else {
-            self.current_match = None;
-            if !self.search_query.is_empty() {
-                self.search_display_text = format!("{} (No matches)", self.search_query);
-            }
+            self.search_display_text = format!(
+                "{} ({} matches)",
+                self.search_query,
+                self.search_matches.len()
+            );
+        } else if !self.search_query.is_empty() {
+            self.search_display_text = format!("{} (No matches)", self.search_query);
         }
         
         // Update window title with search results
@@ -886,11 +1351,19 @@ impl Inlyne {
     fn jump_to_current_match(&mut self) {
         if let Some(current) = self.current_match {
             if let Some(&(elem_idx, _, _)) = self.search_matches.get(current) {
-                // Find the element using the same indexing as search
+                // Find the element using the same indexing as search -- which
+                // means walking the same list `perform_search` walked, or the
+                // index would refer to a different element entirely.
+                let searched_elements: &[Positioned<Element>] = if self.help_visible {
+                    &self.help_elements
+                } else {
+                    &self.elements
+                };
+
                 let mut current_idx = 0;
                 let mut target_element = None;
-                
-                for positioned_element in &self.elements {
+
+                for positioned_element in searched_elements {
                     match &positioned_element.inner {
                         Element::TextBox(_) => {
                             if current_idx == elem_idx {
@@ -1061,15 +1534,50 @@ impl Inlyne {
                     };
                     
                     // Pass search state to redraw for integrated rendering
+                    let status_text = if !self.opts.status_bar {
+                        String::new()
+                    } else if self.search_active {
+                        // Search takes priority over the help screen: searching
+                        // works there too, so the search keys are what matters.
+                        // Once the query has been run, match-stepping becomes
+                        // live and the hints expand to include it.
+                        let mode = if self.search_navigating {
+                            &self.status_bar_hints_search_nav
+                        } else {
+                            &self.status_bar_hints_search
+                        };
+                        // Page movement keeps working mid-query, so keep
+                        // advertising it alongside the search keys.
+                        if self.status_bar_hints_search_extra.is_empty() {
+                            mode.clone()
+                        } else {
+                            format!(
+                                "{}{}{}",
+                                mode,
+                                crate::renderer::STATUS_BAR_SEPARATOR,
+                                self.status_bar_hints_search_extra
+                            )
+                        }
+                    } else if self.help_visible {
+                        // Links on the page behind the help screen aren't
+                        // reachable, so only the help hints are relevant.
+                        self.status_bar_hints_help.clone()
+                    } else {
+                        match &self.hovered_link {
+                            Some(link) => link.clone(),
+                            None => self.status_bar_hints.clone(),
+                        }
+                    };
                     self.renderer
                         .redraw(
-                            elements_to_render, 
+                            elements_to_render,
                             &mut self.selection,
                             self.search_active,
                             &self.search_matches,
                             self.current_match,
                             &self.search_query,
                             self.search_matches.len(),
+                            &status_text,
                         )
                         .context("Renderer failed to redraw the screen")
                         .unwrap();
@@ -1097,7 +1605,10 @@ impl Inlyne {
                             position.y as f32 + self.renderer.scroll_y,
                         );
 
-                        let cursor_icon = if let Some(hoverable) = Self::find_hoverable(
+                        // Resolve the cursor shape and the hovered link in one
+                        // pass; the link is cloned out so the borrow on
+                        // `self.elements` ends with the match.
+                        let (cursor_icon, hovered_link) = match Self::find_hoverable(
                             &mut self.renderer.text_system,
                             &mut self.renderer.positioner.taffy,
                             &self.elements,
@@ -1105,17 +1616,28 @@ impl Inlyne {
                             screen_size,
                             self.renderer.zoom,
                         ) {
-                            match hoverable {
-                                Hoverable::Image(Image { is_link: None, .. }) => {
-                                    CursorIcon::Default
-                                }
-                                Hoverable::Text(Text { link: None, .. }) => CursorIcon::Text,
-                                _some_link => CursorIcon::Hand,
+                            Some(Hoverable::Image(Image { is_link: None, .. })) => {
+                                (CursorIcon::Default, None)
                             }
-                        } else {
-                            CursorIcon::Default
+                            Some(Hoverable::Text(Text { link: None, .. })) => {
+                                (CursorIcon::Text, None)
+                            }
+                            Some(Hoverable::Image(Image { is_link: Some(link), .. }))
+                            | Some(Hoverable::Text(Text { link: Some(link), .. })) => {
+                                (CursorIcon::Hand, Some(link.clone()))
+                            }
+                            Some(_summary) => (CursorIcon::Hand, None),
+                            None => (CursorIcon::Default, None),
                         };
                         self.window.set_cursor_icon(cursor_icon);
+
+                        // CursorMoved fires continuously, so only repaint when
+                        // the link under the cursor actually changes -- and not
+                        // at all when there is no status bar to show it in.
+                        if self.opts.status_bar && self.hovered_link != hovered_link {
+                            self.hovered_link = hovered_link;
+                            self.window.request_redraw();
+                        }
 
                         let scrollbar_width = self.renderer.scrollbar_width();
                         if scrollbar_held.is_some()
@@ -1279,13 +1801,16 @@ impl Inlyne {
                                 // Skip all control characters except backspace
                                 return;
                             }
-                            
-                            // Skip 'n' only when we're in navigation mode (after pressing Enter)
-                            // This allows typing 'n' in search queries before pressing Enter
-                            if (c == 'n' || c == 'N') && self.search_navigating {
+
+                            // The matching `KeyboardInput` already used this key
+                            // to move between matches, so don't also type it.
+                            // Replaces a hardcoded 'n'/'N' check so that
+                            // whatever the user bound is handled.
+                            if self.suppress_next_char {
+                                self.suppress_next_char = false;
                                 return;
                             }
-                            
+
                             // Process regular text input
                             self.update_search_query(c);
                         } else if c == '?' {
@@ -1309,39 +1834,56 @@ impl Inlyne {
                             },
                         ..
                     } => {
-                        // Handle search navigation keys directly when search is active with matches
-                        let search_nav_handled = if self.search_active && !self.search_matches.is_empty() {
-                            match virtual_keycode {
-                                Some(VirtualKeyCode::Return) if modifiers.is_empty() => {
-                                    // Enter activates navigation mode and goes to next match
+                        // Each press starts with no suppression; it is only set
+                        // if this press is consumed as search navigation.
+                        self.suppress_next_char = false;
+
+                        // Enter and Tab are built-in fallbacks for stepping
+                        // through matches. They emit no text, so they are
+                        // never ambiguous against the query, and keeping them
+                        // here means they work even when a config replaces
+                        // `base` without rebinding them. Everything else --
+                        // including custom next/prev keys -- goes through the
+                        // keybinding path below.
+                        //
+                        // The old version also hardcoded 'n'/'Shift+n'; those
+                        // are character keys and are now handled there, where
+                        // the text-vs-navigation rule applies.
+                        let search_nav_handled = if self.search_active
+                            && !self.search_matches.is_empty()
+                        {
+                            let step = match virtual_keycode {
+                                Some(VirtualKeyCode::Return | VirtualKeyCode::Tab) => {
+                                    if modifiers.is_empty() {
+                                        Some(true)
+                                    } else if modifiers == ModifiersState::SHIFT {
+                                        Some(false)
+                                    } else {
+                                        None
+                                    }
+                                }
+                                _ => None,
+                            };
+
+                            match step {
+                                Some(forwards) => {
+                                    // Stepping means the query is finished, so
+                                    // enter navigation mode; that is what makes
+                                    // character keys like `j` start working.
                                     self.search_navigating = true;
-                                    self.next_match();
+                                    if forwards {
+                                        self.next_match();
+                                    } else {
+                                        self.prev_match();
+                                    }
                                     true
                                 }
-                                Some(VirtualKeyCode::Tab) if modifiers.is_empty() => {
-                                    self.next_match();
-                                    true
-                                }
-                                Some(VirtualKeyCode::N) if modifiers.is_empty() && self.search_navigating => {
-                                    // 'n' only works for navigation when in navigation mode (after Enter)
-                                    self.next_match();
-                                    true
-                                }
-                                Some(VirtualKeyCode::N) if modifiers == ModifiersState::SHIFT && self.search_navigating => {
-                                    // Shift+n for previous match in navigation mode
-                                    self.prev_match();
-                                    true
-                                }
-                                Some(VirtualKeyCode::Tab) if modifiers == ModifiersState::SHIFT => {
-                                    self.prev_match();
-                                    true
-                                }
-                                _ => false
+                                None => false,
                             }
                         } else {
                             false
                         };
-                        
+
                         if !search_nav_handled {
                             let key = Key::new(virtual_keycode, scancode);
                             let modified_key = ModifiedKey(key, modifiers);
@@ -1352,32 +1894,105 @@ impl Inlyne {
                             if let Some(action) = action_result {
                                 // When search is active, only allow search-related actions
                                 if self.search_active {
-                                    match action {
-                                        Action::Search => {
-                                            // Toggle search off
-                                            self.toggle_search();
-                                        }
-                                        Action::CancelSearch | Action::Quit => {
-                                            // Cancel search
-                                            self.cancel_search();
-                                        }
-                                        Action::NextMatch => {
-                                            if !self.search_matches.is_empty() {
-                                                self.next_match();
+                                    // While a query is being typed, a key that
+                                    // emits a character belongs to the query,
+                                    // not to its action -- otherwise `q`
+                                    // (Quit), `/` (Search) and `y` (Copy) would
+                                    // fire instead of being typed, making
+                                    // "query" unsearchable.
+                                    //
+                                    // The exception is stepping through matches
+                                    // once Enter has entered navigation mode,
+                                    // where match-stepping takes over the keys.
+                                    let types_text =
+                                        Self::key_produces_text(virtual_keycode, modifiers);
+                                    let navigating_matches = self.search_navigating
+                                        && matches!(
+                                            action,
+                                            Action::NextMatch | Action::PrevMatch
+                                        );
+
+                                    if types_text && !navigating_matches {
+                                        // Fall through; `ReceivedCharacter`
+                                        // types it into the query.
+                                        tracing::debug!(
+                                            "Action {:?} left to text input while searching",
+                                            action
+                                        );
+                                    } else {
+                                        match action {
+                                            Action::Search => {
+                                                // Toggle search off
+                                                self.toggle_search();
                                             }
-                                        }
-                                        Action::PrevMatch => {
-                                            if !self.search_matches.is_empty() {
-                                                self.prev_match();
+                                            Action::CancelSearch | Action::Quit => {
+                                                // Cancel search
+                                                self.cancel_search();
                                             }
-                                        }
-                                        Action::Copy => {
-                                            // Allow copying while searching
-                                            clipboard.set_contents(self.selection.text.trim().to_owned())
-                                        }
-                                        _ => {
-                                            // Ignore all other actions while search is active
-                                            tracing::debug!("Action {:?} ignored while search is active", action);
+                                            Action::NextMatch | Action::PrevMatch => {
+                                                if !self.search_matches.is_empty() {
+                                                    // Stepping to a match means
+                                                    // the query is finished, so
+                                                    // enter navigation mode --
+                                                    // this is what lets
+                                                    // character keys like `j`
+                                                    // start working.
+                                                    self.search_navigating = true;
+                                                    if action == Action::NextMatch {
+                                                        self.next_match();
+                                                    } else {
+                                                        self.prev_match();
+                                                    }
+                                                }
+                                                // Consumed as navigation, so
+                                                // don't also type the key.
+                                                self.suppress_next_char = true;
+                                            }
+                                            Action::Copy => {
+                                                // Allow copying while searching
+                                                clipboard.set_contents(self.selection.text.trim().to_owned())
+                                            }
+                                            // Moving around the page does not
+                                            // disturb the query, and only keys
+                                            // that emit no text reach this arm,
+                                            // so there is nothing to conflict
+                                            // with. Keeping these live is also
+                                            // what lets the status bar list
+                                            // them honestly while searching.
+                                            Action::Scroll(direction) => {
+                                                let lines = match direction {
+                                                    VertDirection::Up => 1.0,
+                                                    VertDirection::Down => -1.0,
+                                                };
+                                                Self::scroll_lines(
+                                                    &mut self.renderer,
+                                                    &self.window,
+                                                    self.lines_to_scroll,
+                                                    lines,
+                                                );
+                                            }
+                                            Action::Page(direction) => {
+                                                let embiggen = match direction {
+                                                    VertDirection::Up => -1.0,
+                                                    VertDirection::Down => 1.0,
+                                                };
+                                                let scroll = self.renderer.scroll_y
+                                                    + embiggen * self.renderer.screen_height();
+                                                self.renderer.set_scroll_y(scroll);
+                                                self.window.request_redraw();
+                                            }
+                                            Action::ToEdge(direction) => {
+                                                let scroll = match direction {
+                                                    VertDirection::Up => 0.0,
+                                                    VertDirection::Down => f32::INFINITY,
+                                                };
+                                                self.renderer.set_scroll_y(scroll);
+                                                self.window.request_redraw();
+                                            }
+                                            _ => {
+                                                // Ignore all other actions while search is active
+                                                tracing::debug!("Action {:?} ignored while search is active", action);
+                                            }
                                         }
                                     }
                                 } else {
@@ -1447,6 +2062,12 @@ impl Inlyne {
                                     }
                                     Action::Search => {
                                         self.toggle_search();
+                                        // Opening search flips `search_active`
+                                        // before this press's `ReceivedCharacter`
+                                        // arrives, so a character key like `/`
+                                        // would otherwise be typed straight into
+                                        // the query it just opened.
+                                        self.suppress_next_char = true;
                                     }
                                     Action::CancelSearch => {
                                         // This action doesn't do anything when search is not active
@@ -1698,3 +2319,283 @@ fn main() -> anyhow::Result<()> {
 
     Ok(())
 }
+
+#[cfg(test)]
+mod status_bar_tests {
+    use super::*;
+    use crate::opts::KeybindingsSection;
+
+    fn hints_from_toml(toml: &str) -> String {
+        let section: KeybindingsSection = toml::from_str(toml).unwrap();
+        let keybindings: keybindings::Keybindings = section.into();
+        Inlyne::build_status_bar_hints(&keybindings)
+    }
+
+    fn help_hints_from_toml(toml: &str) -> String {
+        let section: KeybindingsSection = toml::from_str(toml).unwrap();
+        let keybindings: keybindings::Keybindings = section.into();
+        Inlyne::build_help_status_bar_hints(&keybindings)
+    }
+
+    /// Custom bindings must show up alongside the defaults, not be hidden
+    /// behind whichever happens to be listed first.
+    #[test]
+    fn lists_every_binding_for_an_action() {
+        let hints = hints_from_toml(
+            r#"
+            base = [
+                ["ScrollUp", "Up"],
+                ["ScrollDown", "Down"],
+                ["ScrollUp", "i"],
+                ["ScrollDown", "e"],
+                ["Quit", "Escape"],
+            ]
+            "#,
+        );
+        // Both pairs are advertised, each up key beside its matching down key.
+        assert!(hints.contains("Up/Down"), "missing default pair: {hints}");
+        assert!(hints.contains("i/e"), "missing custom pair: {hints}");
+        assert!(hints.contains("scroll"), "missing label: {hints}");
+    }
+
+    #[test]
+    fn single_actions_list_all_their_keys() {
+        let hints = hints_from_toml(
+            r#"
+            base = [
+                ["Help", "h"],
+                ["Help", { key = "/", mod = ["Shift"] }],
+                ["Quit", "Escape"],
+            ]
+            "#,
+        );
+        assert!(hints.contains("h, ? help"), "{hints}");
+    }
+
+    /// The help screen closes on both the help key and the quit key, and does
+    /// not quit, so it must not advertise "quit".
+    #[test]
+    fn help_hints_describe_closing_not_quitting() {
+        let hints = help_hints_from_toml(
+            r#"
+            base = [
+                ["ScrollUp", "Up"],
+                ["ScrollDown", "Down"],
+                ["Help", { key = "/", mod = ["Shift"] }],
+                ["Quit", "Escape"],
+            ]
+            "#,
+        );
+        assert!(hints.contains("close help"), "{hints}");
+        assert!(hints.contains("?"), "{hints}");
+        assert!(hints.contains("Esc"), "{hints}");
+        assert!(!hints.contains("quit"), "should not offer quit: {hints}");
+    }
+
+    /// An unbalanced pair must not silently drop the surplus key.
+    #[test]
+    fn unpaired_directions_still_listed() {
+        let hints = hints_from_toml(
+            r#"
+            base = [
+                ["ScrollUp", "Up"],
+                ["ScrollDown", "Down"],
+                ["ScrollUp", "i"],
+            ]
+            "#,
+        );
+        assert!(hints.contains("Up/Down"), "{hints}");
+        assert!(hints.contains('i'), "surplus key dropped: {hints}");
+    }
+}
+
+
+
+#[cfg(test)]
+mod help_coverage_tests {
+    use super::*;
+
+    /// Every action the help screen lists must resolve to at least one key
+    /// under the stock keybindings, otherwise the help shows
+    /// "*Not configured*" for something the user has no way to discover.
+    #[test]
+    fn every_help_action_has_a_default_binding() {
+        let kb = keybindings::Keybindings::default();
+        let listed = [
+            (Action::Scroll(VertDirection::Up), "Scroll Up"),
+            (Action::Scroll(VertDirection::Down), "Scroll Down"),
+            (Action::Page(VertDirection::Up), "Page Up"),
+            (Action::Page(VertDirection::Down), "Page Down"),
+            (Action::ToEdge(VertDirection::Up), "Go to Top"),
+            (Action::ToEdge(VertDirection::Down), "Go to Bottom"),
+            (Action::Zoom(Zoom::In), "Zoom In"),
+            (Action::Zoom(Zoom::Out), "Zoom Out"),
+            (Action::Zoom(Zoom::Reset), "Reset Zoom"),
+            (Action::History(HistDirection::Next), "Next File"),
+            (Action::History(HistDirection::Prev), "Previous File"),
+            (Action::Copy, "Copy Selection"),
+            (Action::Search, "Search"),
+            (Action::NextMatch, "Next Search Match"),
+            (Action::PrevMatch, "Previous Search Match"),
+            (Action::Help, "Toggle Help"),
+            (Action::Quit, "Quit"),
+        ];
+
+        let unbound: Vec<&str> = listed
+            .iter()
+            .filter(|(action, _)| Inlyne::keys_for(&kb, *action).is_empty())
+            .map(|(_, name)| *name)
+            .collect();
+
+        assert!(
+            unbound.is_empty(),
+            "help screen would show \"Not configured\" for: {unbound:?}"
+        );
+    }
+
+    /// `CancelSearch` is deliberately unbound -- the quit key cancels an open
+    /// search -- so the help must borrow the quit keys rather than claim it is
+    /// unconfigured.
+    #[test]
+    fn cancel_search_is_covered_by_the_quit_key() {
+        let kb = keybindings::Keybindings::default();
+        assert!(
+            Inlyne::keys_for(&kb, Action::CancelSearch).is_empty(),
+            "if CancelSearch gained a binding, the help fallback can be dropped"
+        );
+        assert!(
+            !Inlyne::keys_for(&kb, Action::Quit).is_empty(),
+            "the fallback relies on Quit being bound"
+        );
+    }
+}
+
+#[cfg(test)]
+mod search_mode_tests {
+    use super::*;
+
+    /// Keys that never emit a character must be able to navigate matches
+    /// straight away; keys that do emit one must wait for navigation mode,
+    /// otherwise they would be stolen from the query being typed.
+    #[test]
+    fn only_character_keys_are_ambiguous_during_search() {
+        let none = ModifiersState::empty();
+        let shift = ModifiersState::SHIFT;
+        let ctrl = ModifiersState::CTRL;
+
+        // Non-character keys -- safe to navigate immediately.
+        for (key, mods) in [
+            (VirtualKeyCode::Return, shift),
+            (VirtualKeyCode::Return, none),
+            (VirtualKeyCode::Tab, shift),
+            (VirtualKeyCode::F3, none),
+            (VirtualKeyCode::G, ctrl),
+        ] {
+            assert!(
+                !Inlyne::key_produces_text(Some(key), mods),
+                "{key:?}+{mods:?} should not be treated as text input"
+            );
+        }
+
+        // Character keys -- must not steal input mid-query.
+        for (key, mods) in [
+            (VirtualKeyCode::J, none),
+            (VirtualKeyCode::J, shift),
+            (VirtualKeyCode::N, none),
+            (VirtualKeyCode::Slash, none),
+        ] {
+            assert!(
+                Inlyne::key_produces_text(Some(key), mods),
+                "{key:?}+{mods:?} should be treated as text input"
+            );
+        }
+    }
+
+    /// While typing, the bar explains how to run the query and how to leave --
+    /// not the page keys, which are inert, and not match-stepping, which is
+    /// not live yet.
+    #[test]
+    fn typing_hints_describe_running_the_search() {
+        let kb = keybindings::Keybindings::default();
+        let hints = Inlyne::build_search_status_bar_hints(&kb);
+        assert!(hints.contains("run search"), "{hints}");
+        assert!(hints.contains("exit search"), "{hints}");
+        assert!(!hints.contains("scroll"), "page keys are inert here: {hints}");
+        // Character keys are swallowed by the query, so they must not be
+        // advertised as working mid-search.
+        assert!(!hints.contains(", q "), "q types into the query: {hints}");
+        assert!(
+            !hints.split("exit").next().unwrap().contains("n,"),
+            "n only works after the search is run: {hints}"
+        );
+    }
+
+    /// Once the search has run, match-stepping is live, so those keys -- including
+    /// character ones like `n` -- are advertised.
+    #[test]
+    fn nav_hints_describe_stepping_through_matches() {
+        let kb = keybindings::Keybindings::default();
+        let hints = Inlyne::build_search_nav_status_bar_hints(&kb);
+        assert!(hints.contains("next match"), "{hints}");
+        assert!(hints.contains("prev match"), "{hints}");
+        assert!(hints.contains("exit search"), "{hints}");
+        // `n` is bound to NextMatch and works in this sub-state.
+        assert!(hints.contains('n'), "{hints}");
+        // Exiting is still never taken over by stepping, so `q` stays out.
+        assert!(!hints.contains(", q "), "q types into the query: {hints}");
+    }
+
+    /// `/` opens search, matching vim/less/browsers. `?` is Shift+/ and stays
+    /// Help, so the two must not collide.
+    #[test]
+    fn slash_opens_search_and_does_not_shadow_help() {
+        let kb = keybindings::Keybindings::default();
+        let search = Inlyne::keys_for(&kb, Action::Search);
+        assert!(search.iter().any(|k| k == "/"), "{search:?}");
+        let help = Inlyne::keys_for(&kb, Action::Help);
+        assert!(help.iter().any(|k| k == "?"), "{help:?}");
+    }
+
+    #[test]
+    fn shift_enter_is_bound_to_previous_match() {
+        let kb = keybindings::Keybindings::default();
+        let prev = Inlyne::keys_for(&kb, Action::PrevMatch);
+        // keys_for caps at MAX_HINT_ALTERNATIVES, so check the raw list.
+        let all: Vec<String> = kb
+            .iter()
+            .filter(|(a, _)| *a == Action::PrevMatch)
+            .map(|(_, c)| Inlyne::format_key_combo(c))
+            .collect();
+        assert!(
+            all.iter().any(|k| k == "Shift+Enter"),
+            "expected Shift+Enter among {all:?} (capped view: {prev:?})"
+        );
+    }
+}
+
+
+
+
+
+
+#[cfg(test)]
+mod search_extra_hint_tests {
+    use super::*;
+
+    /// Page movement stays live during a query, but only via keys that emit no
+    /// text -- `k`/`j` are typed into the query, so advertising them would be
+    /// a lie.
+    #[test]
+    fn extra_hints_only_list_keys_that_survive_text_entry() {
+        let kb = keybindings::Keybindings::default();
+        let extra = Inlyne::build_search_extra_hints(&kb);
+
+        assert!(extra.contains("Up/Down"), "{extra}");
+        assert!(extra.contains("PgUp/PgDn"), "{extra}");
+        assert!(extra.contains("scroll"), "{extra}");
+        assert!(extra.contains("page"), "{extra}");
+        // The vim-style character bindings must not appear.
+        assert!(!extra.contains("k/j"), "character keys advertised: {extra}");
+    }
+}
+

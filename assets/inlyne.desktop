@@ -2,6 +2,7 @@
 Name=Inlyne
 GenericName=Markdown Viewer
 Exec=inlyne view %f
+Icon=text-markdown
 Type=Application
 StartupWMClass=inlyne
 MimeType=text/markdown;
