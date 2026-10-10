@@ -82,7 +82,7 @@ expression: "interpret_md_with_opts(text, opts)"
                 Text {
                     text: "Markdown h1 header",
                     color: Some(Color(BLACK)),
-                    style: BOLD UNDERLINED ,
+                    style: BOLD ,
                     ..
                 },
             ],

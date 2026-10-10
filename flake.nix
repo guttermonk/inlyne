@@ -71,7 +71,43 @@
           
           # Set feature flags (both wayland and x11 are default)
           buildFeatures = [ "wayland" "x11" ];
-          
+
+          # A font for the check phase. src/text.rs's measure_tests build a
+          # cosmic-text FontSystem, and FontSystem::new() loads *system* fonts
+          # through fontdb. With none loaded every stage of cosmic-text's fallback
+          # chain comes up empty and shape.rs panics on its
+          # expect("no default font found") -- three tests, in any sandbox.
+          #
+          # FONTCONFIG_FILE is the knob because of the fontdb dependency this
+          # crate declares in Cargo.toml with features = ["fontconfig"], and the
+          # note above it explains why: it is there to switch the feature on for
+          # cosmic-text's transitive copy of fontdb, which cannot do it itself.
+          # With that feature on, fontdb's load_system_fonts() takes its
+          # load_fontconfig() branch and never looks at the directories it
+          # otherwise hardcodes (/usr/share/fonts, $HOME/.fonts and friends) -- so
+          # planting a font in HOME does nothing, which is worth knowing because it
+          # is the obvious thing to try. load_fontconfig() reads FONTCONFIG_FILE
+          # ahead of /etc/fonts, then walks each <dir> it finds, recursing, so one
+          # generated conf pointing at a font package is enough.
+          #
+          # DejaVu named explicitly rather than left to makeFontsConf's default
+          # (which happens to include dejavu-fonts-minimal): cosmic-text lists
+          # "DejaVu Sans" in its own common_fallback(), so it is found by name
+          # instead of by landing in the "any font that is not a forbidden
+          # fallback" case at the end of the chain.
+          #
+          # No nativeCheckInputs needed with it -- the generated conf names the
+          # font package by store path, so it arrives as part of that input's
+          # closure.
+          #
+          # This also makes the measurements mean one thing. Run outside Nix the
+          # tests pick up whatever is in ~/.local/share/fonts, which on the machine
+          # these were written on is two display fonts from 2004 and 2024, so the
+          # numbers moved with the host.
+          preCheck = ''
+            export FONTCONFIG_FILE=${pkgs.makeFontsConf { fontDirectories = [ pkgs.dejavu_fonts ]; }}
+          '';
+
           # Runtime dependencies for GPU acceleration
           postInstall = ''
             wrapProgram $out/bin/inlyne \

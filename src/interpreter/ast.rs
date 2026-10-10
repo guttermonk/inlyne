@@ -528,9 +528,6 @@ impl Process for FlowProcess {
                 element.font_size *= header.size_multiplier();
                 element.is_header = true;
 
-                if header == HeaderType::H1 {
-                    state.text_options.underline = true;
-                }
                 FlowProcess::process_content(
                     global,
                     element,

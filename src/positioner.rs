@@ -256,8 +256,15 @@ impl Positioner {
             
             // Determine padding based on element type
             let padding = if matches!(&elements[i].inner, Element::TextBox(text_box) if text_box.is_header) {
-                // Headers always get at least 2px padding after them
-                let min_header_padding = 2.0 * self.hidpi_scale * zoom;
+                // A table directly under a heading is that heading's table and
+                // wants to sit tight against it, so 2px. Anything else -- a
+                // paragraph, a blockquote, a nested heading -- needs air, or the
+                // heading crowds the text and reads as the first line of it
+                // rather than as a label for what follows.
+                let next_is_table =
+                    matches!(elements.get(i + 1).map(|e| &e.inner), Some(Element::Table(_)));
+                let min_header_padding =
+                    if next_is_table { 2.0 } else { 12.0 } * self.hidpi_scale * zoom;
                 let normal_padding = element_padding * self.hidpi_scale * zoom;
                 normal_padding.max(min_header_padding)
             } else if matches!(&elements[i].inner, Element::Table(_)) {

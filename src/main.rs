@@ -843,6 +843,61 @@ impl Inlyne {
         content
     }
 
+    /// An uncaptioned table separated from the heading above it by nothing but
+    /// spacers belongs to that heading, so the spacers come out and the table
+    /// sits tight underneath.
+    ///
+    /// Only spacers, and only when they are the whole gap. Anything else in
+    /// between -- a blockquote, an intro paragraph, a second heading -- means
+    /// the table is its own block and that content has to stay. This used to
+    /// mark every element in the gap and scan past prose for a table
+    /// arbitrarily far below, so a sheet opening with a title, a
+    /// generated-from note and an intro lost all three plus its first
+    /// subheading, leaving the table hard under the title.
+    ///
+    /// Runs per drained batch, so it only ever sees elements the interpreter
+    /// has already handed over. A heading and its table landing in different
+    /// batches is the reason the old version destroyed content in release
+    /// builds and not in debug ones: the faster build delivered the whole
+    /// document at once, and the slower one split it.
+    fn tighten_tables_under_headings(elements: &mut Vec<Element>) {
+        let mut to_remove: Vec<usize> = Vec::new();
+
+        for i in 0..elements.len() {
+            if !matches!(&elements[i], Element::TextBox(tb) if tb.is_header) {
+                continue;
+            }
+
+            let mut gap: Vec<usize> = Vec::new();
+            for j in (i + 1)..elements.len() {
+                match &elements[j] {
+                    Element::Spacer(_) => gap.push(j),
+                    Element::Table(table) => {
+                        let has_caption = table.caption.as_ref()
+                            .map(|c| !c.texts.is_empty() && c.texts.iter().any(|t| !t.text.trim().is_empty()))
+                            .unwrap_or(false);
+
+                        if !has_caption {
+                            to_remove.append(&mut gap);
+                        }
+                        break;
+                    }
+                    _ => break,
+                }
+            }
+        }
+
+        // Removal is back to front so earlier indices stay valid. A heading
+        // stops the scan, so no two headings can claim the same gap and the
+        // indices arrive ascending; the sort and dedup make that a property of
+        // the removal rather than of the search above it.
+        to_remove.sort_unstable();
+        to_remove.dedup();
+        for &idx in to_remove.iter().rev() {
+            elements.remove(idx);
+        }
+    }
+
     pub fn position_queued_elements(
         element_queue: &Arc<Mutex<Vec<Element>>>,
         renderer: &mut Renderer,
@@ -851,50 +906,9 @@ impl Inlyne {
         let positioning_start = Instant::now();
 
         let mut elements_vec: Vec<Element> = element_queue.lock().drain(..).collect();
-        
-        // FIRST: Remove ALL elements between headers and tables without captions
-        let mut elements_to_remove = Vec::new();
-        
-        for i in 0..elements_vec.len() {
-            // Find headers
-            if let Element::TextBox(ref tb) = elements_vec[i] {
-                if tb.is_header {
-                    // Found a header, look for next table
-                    let mut found_table_without_caption = false;
-                    let mut table_idx = 0;
-                    
-                    for j in (i + 1)..elements_vec.len() {
-                        match &elements_vec[j] {
-                            Element::Table(table) => {
-                                let has_caption = table.caption.as_ref()
-                                    .map(|c| !c.texts.is_empty() && c.texts.iter().any(|t| !t.text.trim().is_empty()))
-                                    .unwrap_or(false);
-                                
-                                if !has_caption {
-                                    found_table_without_caption = true;
-                                    table_idx = j;
-                                }
-                                break;
-                            }
-                            _ => continue,
-                        }
-                    }
-                    
-                    // If we found a table without caption, mark ALL elements between for removal
-                    if found_table_without_caption {
-                        for k in (i + 1)..table_idx {
-                            elements_to_remove.push(k);
-                        }
-                    }
-                }
-            }
-        }
-        
-        // Actually remove the elements (in reverse order to maintain indices)
-        for &idx in elements_to_remove.iter().rev() {
-            elements_vec.remove(idx);
-        }
-        
+
+        Self::tighten_tables_under_headings(&mut elements_vec);
+
         // SECOND: Position remaining elements normally
         // We need to check ahead before consuming elements, so we'll iterate while checking first
         while !elements_vec.is_empty() {
@@ -2663,5 +2677,135 @@ mod config_error_tests {
         // The excerpt/caret lines are noise on a status bar.
         assert!(!summary.contains('^'), "caret leaked in: {summary}");
         println!("SUMMARY: {summary}");
+    }
+}
+
+/// The heading/table tightening pass once removed everything in the gap, not
+/// just the spacers, which silently ate real content.
+#[cfg(test)]
+mod tighten_tables_tests {
+    use super::*;
+    use crate::positioner::Spacer;
+    use crate::table::Table;
+    use crate::text::{Text, TextBox};
+
+    fn heading(s: &str) -> Element {
+        let mut tb = TextBox::new(vec![Text::new(s.to_owned(), 1.0, [0.; 4])], 1.0);
+        tb.is_header = true;
+        Element::TextBox(tb)
+    }
+
+    fn prose(s: &str) -> Element {
+        Element::TextBox(TextBox::new(
+            vec![Text::new(s.to_owned(), 1.0, [0.; 4])],
+            1.0,
+        ))
+    }
+
+    fn spacer() -> Element {
+        Element::Spacer(Spacer::invisible())
+    }
+
+    fn table() -> Element {
+        Element::Table(Table::new())
+    }
+
+    fn describe(elements: &[Element]) -> Vec<String> {
+        elements
+            .iter()
+            .map(|e| match e {
+                Element::TextBox(tb) => {
+                    let text: String = tb.texts.iter().flat_map(|t| t.text.chars()).collect();
+                    if tb.is_header {
+                        format!("h:{text}")
+                    } else {
+                        format!("p:{text}")
+                    }
+                }
+                Element::Spacer(_) => "spacer".to_owned(),
+                Element::Table(_) => "table".to_owned(),
+                _ => "other".to_owned(),
+            })
+            .collect()
+    }
+
+    /// Spacers are the whole gap, so they go and the table tightens up.
+    #[test]
+    fn spacers_between_heading_and_table_are_dropped() {
+        let mut elements = vec![heading("Keys"), spacer(), spacer(), table()];
+        Inlyne::tighten_tables_under_headings(&mut elements);
+        assert_eq!(describe(&elements), ["h:Keys", "table"]);
+    }
+
+    /// The real cheatsheet shape: a title, a generated-from note, an intro,
+    /// then the first subheading and its table. Every one of those used to
+    /// disappear because the scan ran from the title past all the prose to the
+    /// first table it could find.
+    #[test]
+    fn prose_between_title_and_first_table_survives() {
+        let mut elements = vec![
+            heading("Hyprland Cheatsheet"),
+            spacer(),
+            prose("Generated from keybinds.nix on rebuild."),
+            spacer(),
+            prose("Grouped by bind type."),
+            spacer(),
+            heading("Keys"),
+            spacer(),
+            table(),
+        ];
+        Inlyne::tighten_tables_under_headings(&mut elements);
+        assert_eq!(
+            describe(&elements),
+            [
+                "h:Hyprland Cheatsheet",
+                "spacer",
+                "p:Generated from keybinds.nix on rebuild.",
+                "spacer",
+                "p:Grouped by bind type.",
+                "spacer",
+                "h:Keys",
+                "table",
+            ]
+        );
+    }
+
+    /// A paragraph in the gap means the table is its own block, so the spacers
+    /// around it stay too -- removing them would close a gap the author wrote.
+    #[test]
+    fn prose_in_the_gap_leaves_spacers_alone() {
+        let mut elements = vec![heading("Keys"), spacer(), prose("A note."), spacer(), table()];
+        let before = describe(&elements);
+        Inlyne::tighten_tables_under_headings(&mut elements);
+        assert_eq!(describe(&elements), before);
+    }
+
+    /// A captioned table keeps its spacing: the caption is its own label, so it
+    /// is not being tucked under the heading.
+    #[test]
+    fn captioned_table_keeps_its_spacers() {
+        let mut captioned = Table::new();
+        captioned.caption = Some(TextBox::new(
+            vec![Text::new("Table 1".to_owned(), 1.0, [0.; 4])],
+            1.0,
+        ));
+        let mut elements = vec![heading("Keys"), spacer(), Element::Table(captioned)];
+        let before = describe(&elements);
+        Inlyne::tighten_tables_under_headings(&mut elements);
+        assert_eq!(describe(&elements), before);
+    }
+
+    /// Two headings in a row: only the one actually above the table tightens.
+    #[test]
+    fn only_the_heading_above_the_table_tightens() {
+        let mut elements = vec![
+            heading("Outer"),
+            spacer(),
+            heading("Inner"),
+            spacer(),
+            table(),
+        ];
+        Inlyne::tighten_tables_under_headings(&mut elements);
+        assert_eq!(describe(&elements), ["h:Outer", "spacer", "h:Inner", "table"]);
     }
 }

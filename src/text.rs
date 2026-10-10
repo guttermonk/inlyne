@@ -46,7 +46,21 @@ impl TextBoxMeasure {
         };
         let width_bound = known_dimensions.width.unwrap_or(available_width);
 
-        let size = self.internal_measure((width_bound, f32::MAX));
+        let size = match available_space.width {
+            // Min-content asks how narrow this can get, which is the width of
+            // its longest unbreakable run. Measuring against a zero bound does
+            // report that width, but the height it returns alongside is the
+            // height of text broken as hard as it will go -- 27 lines for a
+            // table cell whose resolved column needs 9. Taffy takes that height
+            // as the row's floor, which is where the empty space under a cell
+            // holding a long unbreakable token came from. Ask again at the
+            // width just reported so the pair describes the same layout.
+            AvailableSpace::MinContent if known_dimensions.width.is_none() => {
+                let min_width = self.internal_measure((0.0, f32::MAX)).0;
+                self.internal_measure((min_width, f32::MAX))
+            }
+            _ => self.internal_measure((width_bound, f32::MAX)),
+        };
         TaffySize {
             width: known_dimensions.width.unwrap_or(size.0),
             height: known_dimensions.height.unwrap_or(size.1),
@@ -828,4 +842,99 @@ pub struct TextSystem {
     pub text_atlas: glyphon::TextAtlas,
     pub text_cache: Arc<Mutex<TextCache>>,
     pub swash_cache: SwashCache,
+}
+
+#[cfg(test)]
+mod measure_tests {
+    use super::*;
+
+    fn measurer(text: &str) -> TextBoxMeasure {
+        let textbox = TextBox::new(vec![Text::new(text.to_owned(), 1.0, [0.; 4])], 1.0);
+        TextBoxMeasure {
+            textbox: Arc::new(textbox),
+            text_cache: Arc::new(Mutex::new(TextCache::new())),
+            font_system: Arc::new(Mutex::new(FontSystem::new())),
+            zoom: 1.0,
+        }
+    }
+
+    fn min_content(m: &TextBoxMeasure) -> TaffySize<f32> {
+        m.measure(
+            TaffySize { width: None, height: None },
+            TaffySize {
+                width: AvailableSpace::MinContent,
+                height: AvailableSpace::MaxContent,
+            },
+        )
+    }
+
+    fn at_width(m: &TextBoxMeasure, width: f32) -> TaffySize<f32> {
+        m.measure(
+            TaffySize { width: Some(width), height: None },
+            TaffySize {
+                width: AvailableSpace::Definite(width),
+                height: AvailableSpace::MaxContent,
+            },
+        )
+    }
+
+    /// Min-content has to describe a single layout: the height must be the
+    /// height at the width it reports. It used to return the width of the
+    /// longest unbreakable run paired with the height of text broken as hard
+    /// as it would go -- 475px against a 158px layout. Taffy takes that height
+    /// as a grid row's floor, so the mismatch left hundreds of empty pixels
+    /// under the cell.
+    #[test]
+    fn min_content_height_matches_the_width_it_reports() {
+        let m = measurer(
+            "Use current selection as the search pattern, automatically \
+             wrapping with \\b on word boundaries",
+        );
+
+        let min = min_content(&m);
+        let resolved = at_width(&m, min.width);
+
+        assert_eq!(
+            min.height, resolved.height,
+            "min-content said {}x{} but that width actually lays out {} tall",
+            min.width, min.height, resolved.height
+        );
+    }
+
+    /// A single unbreakable token cannot wrap at all, so min-content and
+    /// max-content describe the same one-line layout.
+    #[test]
+    fn unbreakable_token_is_one_line_at_min_content() {
+        let m = measurer("search_selection_detect_word_boundaries");
+
+        let min = min_content(&m);
+        let max = m.measure(
+            TaffySize { width: None, height: None },
+            TaffySize {
+                width: AvailableSpace::MaxContent,
+                height: AvailableSpace::MaxContent,
+            },
+        );
+
+        assert_eq!(min.height, max.height, "an unbreakable token gained lines");
+        assert!(min.width > 0., "min-content width collapsed to zero");
+    }
+
+    /// A caller that already knows the width still gets the height for that
+    /// width, min-content or not.
+    #[test]
+    fn known_width_wins_over_min_content() {
+        let m = measurer("Use current selection as the search pattern");
+
+        let known = m.measure(
+            TaffySize { width: Some(200.), height: None },
+            TaffySize {
+                width: AvailableSpace::MinContent,
+                height: AvailableSpace::MaxContent,
+            },
+        );
+
+        assert_eq!(known.width, 200.);
+        assert_eq!(known.height, at_width(&m, 200.).height);
+    }
 }
