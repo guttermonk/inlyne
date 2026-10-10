@@ -1536,6 +1536,11 @@ impl Inlyne {
                     // Pass search state to redraw for integrated rendering
                     let status_text = if !self.opts.status_bar {
                         String::new()
+                    } else if let Some(err) = &self.opts.config_error {
+                        // Outranks the hints: the keys being advertised are the
+                        // defaults, not the user's, and saying so is the only
+                        // on-screen clue that the config was dropped.
+                        err.clone()
                     } else if self.search_active {
                         // Search takes priority over the help screen: searching
                         // works there too, so the search keys are what matters.
@@ -1578,6 +1583,7 @@ impl Inlyne {
                             &self.search_query,
                             self.search_matches.len(),
                             &status_text,
+                            self.opts.config_error.is_some(),
                         )
                         .context("Renderer failed to redraw the screen")
                         .unwrap();
@@ -2245,6 +2251,34 @@ impl Inlyne {
     }
 }
 
+/// Condenses a config load failure into one line for the status bar.
+///
+/// `toml` reports errors across several lines -- a location, an excerpt of the
+/// offending line, a caret, then the reason. The location and the reason are
+/// the parts worth showing; the excerpt is already on screen in the user's
+/// editor. The full error still goes to the log.
+fn summarize_config_error(err: &anyhow::Error) -> String {
+    let rendered = format!("{err:#}");
+    let mut lines = rendered.lines().map(str::trim).filter(|l| !l.is_empty());
+
+    let Some(first) = lines.next() else {
+        return "config failed to load, using defaults".to_string();
+    };
+    // Drop the excerpt/caret lines that `toml` draws with `|`.
+    let reason = rendered
+        .lines()
+        .map(str::trim)
+        .filter(|l| !l.is_empty() && !l.starts_with('|') && !l.contains(" | "))
+        .next_back()
+        .filter(|last| *last != first);
+
+    let detail = match reason {
+        Some(reason) => format!("{first}: {reason}"),
+        None => first.to_string(),
+    };
+    format!("config error -- using defaults -- {detail}")
+}
+
 fn main() -> anyhow::Result<()> {
     setup_panic!();
 
@@ -2261,6 +2295,12 @@ fn main() -> anyhow::Result<()> {
 
     match command {
         Commands::View(view) => {
+            // An explicitly requested config is a hard error; the default one
+            // falls back so a single typo cannot stop inlyne from opening the
+            // very file that explains how to fix it. The failure is recorded
+            // and shown in the status bar, because a GUI launch has no
+            // terminal for the log warning to land in.
+            let mut config_error = None;
             let config = match &view.config {
                 Some(config_path) => Config::load_from_file(config_path)?,
                 None => Config::load_from_system().unwrap_or_else(|err| {
@@ -2268,10 +2308,12 @@ fn main() -> anyhow::Result<()> {
                         "Failed reading config file. Falling back to defaults. Error: {}",
                         err
                     );
+                    config_error = Some(summarize_config_error(&err));
                     Config::default()
                 }),
             };
-            let opts = Opts::parse_and_load_from(view, config)?;
+            let mut opts = Opts::parse_and_load_from(view, config)?;
+            opts.config_error = config_error;
 
             if let Some(exporter) = &opts.metrics {
                 match exporter {
@@ -2599,3 +2641,27 @@ mod search_extra_hint_tests {
     }
 }
 
+
+#[cfg(test)]
+mod config_error_tests {
+    use super::*;
+
+    /// A dropped config must say so on one readable line: where it broke and
+    /// why, without the multi-line excerpt `toml` draws.
+    #[test]
+    fn summarizes_a_toml_error_to_one_line() {
+        let err = crate::opts::Config::load_from_str(
+            "[dark-theme]\nscrollbar-color = \"blue\"\n",
+        )
+        .unwrap_err();
+        let summary = summarize_config_error(&err);
+
+        assert!(!summary.contains('\n'), "must be one line: {summary}");
+        assert!(summary.contains("using defaults"), "{summary}");
+        assert!(summary.contains("line 2"), "should say where: {summary}");
+        assert!(summary.contains("expected u32"), "should say why: {summary}");
+        // The excerpt/caret lines are noise on a status bar.
+        assert!(!summary.contains('^'), "caret leaked in: {summary}");
+        println!("SUMMARY: {summary}");
+    }
+}

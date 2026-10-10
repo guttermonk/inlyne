@@ -1090,7 +1090,11 @@ impl Renderer {
     /// `status_text` is whatever the caller wants shown there: the URL of the
     /// link under the cursor when there is one, otherwise the keybinding hints.
     /// An empty string draws nothing, which is how the bar is disabled.
-    fn render_status_bar(&mut self, status_text: &str) -> Vec<CachedTextArea> {
+    fn render_status_bar(
+        &mut self,
+        status_text: &str,
+        status_is_error: bool,
+    ) -> Vec<CachedTextArea> {
         let mut text_areas = Vec::new();
 
         if !self.status_bar_visible || status_text.is_empty() {
@@ -1123,7 +1127,13 @@ impl Renderer {
         const STATUS_BAR_KEY: u64 = 0x57A7_0_5BA_0000_0001;
 
         let text_color = {
-            let c = self.theme.text_color;
+            // Errors use the search "no match" colour so a dropped config is
+            // obviously a problem rather than just more chrome.
+            let c = if status_is_error {
+                self.theme.search_no_match_color
+            } else {
+                self.theme.text_color
+            };
             glyphon::Color::rgb((c >> 16) as u8, (c >> 8) as u8, c as u8)
         };
 
@@ -1391,6 +1401,7 @@ impl Renderer {
         search_query: &str,
         total_matches: usize,
         status_text: &str,
+        status_is_error: bool,
     ) -> anyhow::Result<()> {
         selection.text.clear();
         let frame = self
@@ -1429,7 +1440,7 @@ impl Renderer {
             current_match,
             total_matches,
         );
-        overlay_text_areas.extend(self.render_status_bar(status_text));
+        overlay_text_areas.extend(self.render_status_bar(status_text, status_is_error));
 
         let vertex_buf = self
             .device

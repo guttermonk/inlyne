@@ -76,6 +76,10 @@ pub struct Opts {
     pub element_padding: f32,
     /// Whether the bottom status bar is shown.
     pub status_bar: bool,
+    /// Set when the config at the default location failed to load and
+    /// defaults were used instead. Surfaced in the status bar, since a GUI
+    /// launch has no terminal to show the log warning in.
+    pub config_error: Option<String>,
 }
 
 impl Opts {
@@ -184,6 +188,8 @@ impl Opts {
             size,
             element_padding: 2.0,
             status_bar: status_bar.into(),
+            // Filled in by the caller, which is where loading happens.
+            config_error: None,
         })
     }
 
