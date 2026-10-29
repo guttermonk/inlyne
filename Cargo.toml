@@ -72,7 +72,7 @@ parking_lot = "0.12.3"
 # Dead simple way to handle some async operations
 pollster = "0.4.0"
 # Used to get a handle to the display, so that we can setup a clipboard
-raw-window-handle = "0.5.2"
+raw-window-handle = "0.6.2"
 # SVG rendering
 resvg = "0.39.0"
 # Parses the optional YAML frontmatter (replace with just a yaml parser)
