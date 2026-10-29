@@ -1,5 +1,20 @@
 version: 2
 updates:
+  # inlyne renders whatever a URL hands it -- remote HTML, images and SVG --
+  # so the parsing stack (html5ever, image, resvg, ureq) is the attack surface
+  # and is worth tracking rather than bumping by hand at release time.
+  - package-ecosystem: "cargo"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    # Patch bumps across this many crates are noise; collapse them into one
+    # PR. Minor and major stay as separate PRs -- a bump in a format parser is
+    # exactly the one to read the changelog for.
+    groups:
+      patch:
+        update-types:
+          - "patch"
+
   - package-ecosystem: "github-actions"
     directory: "/"
     schedule:
