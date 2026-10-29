@@ -4004,22 +4004,22 @@ checksum = "3c5e1a9a646d36c3599cd173a41282daf47c44583ad367b8e6837255952e5c67"
 
 [[package]]
 name = "smart-debug"
-version = "0.0.3"
+version = "0.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "54708a918472ed0a5cb90775fd2bd649c949e1630c973901bc2cff987710d98b"
+checksum = "453136378d7d1052d49557bdd199da36b5519b727d8b8697bff814611a32f5ad"
 dependencies = [
  "smart-debug-derive",
 ]
 
 [[package]]
 name = "smart-debug-derive"
-version = "0.0.3"
+version = "0.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e217678d06a85df0b9ac15c6c74ebc68b2d43c95ede39e126e21b4c89d314056"
+checksum = "55c800dcad0ffd0654be9bfe39d0ab91bbf7d730dfca4694c55321f2faed379b"
 dependencies = [
  "proc-macro2",
  "quote",
- "syn 2.0.98",
+ "syn 3.0.9",
 ]
 
 [[package]]
@@ -4194,6 +4194,17 @@ name = "syn"
 version = "2.0.98"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "36147f1a48ae0ec2b5b3bc5b537d267457555a10dc06f3dbc8cb11ba3006d3b1"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "unicode-ident",
+]
+
+[[package]]
+name = "syn"
+version = "3.0.9"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d78c8dee4c7bf0e14673097256fed6142ce9d3b85a408189d07482442145823b"
 dependencies = [
  "proc-macro2",
  "quote",
